@@ -33,6 +33,7 @@ from buildbot.process.results import WARNINGS
 from buildbot.reporters import http
 from buildbot.util import httpclientservice
 from buildbot.util import unicode2NativeString
+from buildbot.reporters import utils
 
 HOSTED_BASE_URL = 'https://gitlab.com'
 
@@ -86,12 +87,12 @@ class GitLabStatusPush(http.HttpStatusPushBase):
         if context is not None:
             payload['name'] = context
 
-        return self._http.post('/api/v3/projects/%d/statuses/%s' % (
+        return self._http.post('/api/v4/projects/%d/statuses/%s' % (
             project_id, sha),
             json=payload)
 
     @defer.inlineCallbacks
-    def send(self, build):
+    def send(self, build, step=None):
         props = Properties.fromDict(build['properties'])
 
         if build['complete']:
@@ -110,38 +111,42 @@ class GitLabStatusPush(http.HttpStatusPushBase):
             description = yield props.render(self.startDescription)
 
         context = yield props.render(self.context)
-
         sourcestamps = build['buildset']['sourcestamps']
-        project = sourcestamps[0]['project']
-
-        # default to master if not found
-        branch = sourcestamps[0].get('branch', 'master')
-
-        if project:
-            repoOwner, repoName = project.split('/')
-        else:
-            repo = sourcestamps[0]['repository'].split('/')[-2:]
-            repoOwner = repo[0]
-            repoName = '.'.join(repo[1].split('.')[:-1])
-
-        m = re.match(".*:(.*)", repoOwner)
-        if m is not None:
-            repoOwner = m.group(1)
-
-        # retrieve project id via cache
-        self.project_ids
-        project_full_name = "%s%%2F%s" % (repoOwner, repoName)
-        project_full_name = unicode2NativeString(project_full_name)
-
-        if project_full_name not in self.project_ids:
-            proj = yield self._http.get('/api/v3/projects/%s' % (project_full_name))
-            proj = yield proj.json()
-            self.project_ids[project_full_name] = proj['id']
-
-        proj_id = self.project_ids[project_full_name]
         for sourcestamp in sourcestamps:
-            sha = sourcestamp['revision']
             try:
+                project = sourcestamp['project']
+                repoOwner = None
+                sha = None
+                repoName = None
+                # default to master if not found
+                branch = sourcestamp.get('branch', 'master')
+
+                if project:
+                    repoOwner, repoName = project.split('/')
+                else:
+                    repo = re.split(":|/", sourcestamp['repository'])[-2:]
+                    repoOwner = repo[0]
+                    repoName = '.'.join(repo[1].split('.')[:-1])
+
+                m = re.match(".*:(.*)", repoOwner)
+                if m is not None:
+                    repoOwner = m.group(1)
+
+                # retrieve project id via cache
+                self.project_ids
+                project_full_name = "%s%%2F%s" % (repoOwner, repoName)
+                project_full_name = unicode2NativeString(project_full_name)
+
+                if project_full_name not in self.project_ids:
+                    proj = yield self._http.get(
+                        '/api/v4/projects/%s' %
+                        (project_full_name))
+                    proj = yield proj.json()
+                    self.project_ids[project_full_name] = proj['id']
+
+                proj_id = self.project_ids[project_full_name]
+
+                sha = sourcestamp['revision']
                 branch = unicode2NativeString(branch)
                 sha = unicode2NativeString(sha)
                 state = unicode2NativeString(state)
