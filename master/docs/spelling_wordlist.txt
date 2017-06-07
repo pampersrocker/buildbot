@@ -167,6 +167,8 @@ Config
 configs
 Configs
 configurability
+configurator
+configurators
 contrib
 Contrib
 coolproject
@@ -359,10 +361,12 @@ inrepo
 inrepos
 interCaps
 internet
+interoperable
 ini
 intialization
 io
 ip
+iPhone
 IProperties
 iptables
 irc

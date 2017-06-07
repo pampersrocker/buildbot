@@ -165,6 +165,7 @@ setup_args = {
     'packages': [
         "buildbot",
         "buildbot.buildslave",
+        "buildbot.configurators",
         "buildbot.worker",
         "buildbot.worker.protocols",
         "buildbot.changes",
@@ -318,6 +319,7 @@ setup_args = {
         ]),
         ('buildbot.reporters', [
             ('buildbot.reporters.mail', ['MailNotifier']),
+            ('buildbot.reporters.pushover', ['PushoverNotifier']),
             ('buildbot.reporters.message', ['MessageFormatter']),
             ('buildbot.reporters.gerrit', ['GerritStatusPush']),
             ('buildbot.reporters.gerrit_verify_status',
@@ -339,6 +341,7 @@ setup_args = {
                  'split_file_projects_branches'),
                 ('svn.split_file_branches', 'split_file_branches'),
                 ('svn.split_file_alwaystrunk', 'split_file_alwaystrunk')]),
+            ('buildbot.configurators.janitor', ['JanitorConfigurator']),
             ('buildbot.config', ['BuilderConfig']),
             ('buildbot.locks', [
                 'MasterLock',

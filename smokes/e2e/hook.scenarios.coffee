@@ -12,7 +12,7 @@ describe 'change hook', () ->
     afterEach () ->
         new homePage().waitAllBuildsFinished()
 
-    xit 'should create a build', () ->
+    it 'should create a build', () ->
         builder.go()
         builder.getLastSuccessBuildNumber().then (lastbuild) ->
             browser.executeAsyncScript (done)->
@@ -20,7 +20,8 @@ describe 'change hook', () ->
                     comments:'sd',
                     project:'pyflakes'
                     repository:'git://github.com/buildbot/pyflakes.git'
-                    author:'foo'
+                    author:'foo <foo@bar.com>'
+                    revision: 'HEAD'
                     branch:'master'
                     }, done)
             builder.waitNextBuildFinished(lastbuild)

@@ -158,6 +158,23 @@ Arguments common to all :class:`BuildStep` subclasses:
     The character encoding to use to decode logs produced during the execution of this step.
     This overrides the default :bb:cfg:`logEncoding`; see :ref:`Log-Encodings`.
 
+.. index:: Buildstep Parameter; updateBuildSummaryPolicy
+
+``updateBuildSummaryPolicy``
+    The policy to use to propagate the step summary to the build summary.
+    If False, the build summary will never include step summary
+    If True, the build summary will always include step summary
+    If set to a list (e.g. ``[FAILURE, EXCEPTION]``), it will propagate if the step results id is present in that list.
+    If not set or None, the default is computed according to other BuildStep parameters using following algorithm::
+
+        self.updateBuildSummaryPolicy = [EXCEPTION, RETRY, CANCELLED]
+        if self.flunkOnFailure or self.haltOnFailure or self.warnOnFailure:
+            self.updateBuildSummaryPolicy.append(FAILURE)
+        if self.warnOnWarnings or self.flunkOnWarnings:
+            self.updateBuildSummaryPolicy.append(WARNINGS)
+
+    Note that in a custom step, if :py:meth:`BuildStep.getResultSummary` is overridden and setting the ``build`` summary, ``updateBuildSummaryPolicy`` is ignored and ``build`` summary will be used regardless.
+
 .. _Source-Checkout:
 
 Source Checkout
@@ -1638,7 +1655,7 @@ Available constructor arguments are:
     An array of custom parameters to pass directly to the ``robocopy`` command.
 
 ``verbose``
-    Whether to output verbose information (``/V /TS /TP`` parameters).
+    Whether to output verbose information (``/V /TS /FP`` parameters).
 
 Note that parameters ``/TEE /NP`` will always be appended to the command to signify, respectively, to output logging to the console, use Unicode logging, and not print any percentage progress information for each file.
 
@@ -2124,8 +2141,8 @@ The ``blocksize=`` argument controls how the file is sent over the network: larg
 
 The ``mode=`` argument allows you to control the access permissions of the target file, traditionally expressed as an octal integer.
 The most common value is probably ``0755``, which sets the `x` executable bit on the file (useful for shell scripts and the like).
-The default value for ``mode=`` is None, which means the permission bits will default to whatever the umask of the writing process is.
-The default umask tends to be fairly restrictive, but at least on the worker you can make it less restrictive with a --umask command-line option at creation time (:ref:`Worker-Options`).
+The default value for ``mode=`` is ``None``, which means the permission bits will default to whatever the umask of the writing process is.
+The default umask tends to be fairly restrictive, but at least on the worker you can make it less restrictive with a ``--umask`` command-line option at creation time (:ref:`Worker-Options`).
 
 The ``keepstamp=`` argument is a boolean that, when ``True``, forces the modified and accessed time of the destination file to match the times of the source file.
 When ``False`` (the default), the modified and accessed times of the destination file are set to the current time on the buildmaster.
