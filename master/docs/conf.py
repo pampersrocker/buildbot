@@ -90,6 +90,7 @@ else:
     with open('../buildbot/__init__.py') as f:
         exec(f.read(), gl)
     version = gl['version']
+
 # The full version, including alpha/beta/rc tags.
 release = version
 
@@ -225,10 +226,6 @@ html_static_path = ['_static']
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
 # html_last_updated_fmt = '%b %d, %Y'
-
-# If true, SmartyPants will be used to convert quotes and dashes to
-# typographically correct entities.
-html_use_smartypants = False
 
 # Custom sidebar templates, maps document names to template names.
 html_sidebars = {

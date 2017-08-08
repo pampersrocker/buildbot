@@ -46,7 +46,7 @@ Arguments common to all :class:`BuildStep` subclasses:
 
 ``name``
     the name used to describe the step on the status display.
-    It is also used to give a name to any :class:`LogFile`\s created by this step.
+    Since 0.9.8, this argument might be renderable.
 
 .. index:: Buildstep Parameter; haltOnFailure
 
@@ -136,7 +136,7 @@ Arguments common to all :class:`BuildStep` subclasses:
 ``hideStepIf``
     A step can be optionally hidden from the waterfall and build details web pages.
     To do this, set the step's ``hideStepIf`` to a boolean value, or to a function that takes two parameters -- the results and the :class:`BuildStep` -- and returns a boolean value.
-    Steps are always shown while they execute, however after the step as finished, this parameter is evaluated (if a function) and if the value is True, the step is hidden.
+    Steps are always shown while they execute, however after the step has finished, this parameter is evaluated (if a function) and if the value is True, the step is hidden.
     For example, in order to hide the step if the step has been skipped::
 
         factory.addStep(Foo(..., hideStepIf=lambda results, s: results==SKIPPED))
@@ -1333,10 +1333,12 @@ In addition to the parameters :bb:step:`ShellCommand` supports, this step accept
 
 ``definitions``
     A dictionary that contains parameters that will be converted to ``-D{name}={value}`` when passed to CMake.
+    A renderable which renders to a dictionary can also be provided, see :ref:`Properties`.
     Refer to `cmake(1) <https://cmake.org/cmake/help/latest/manual/cmake.1.html>`_ for more information.
 
 ``options``
     A list or a tuple that contains options that will be passed to CMake as is.
+    A renderable which renders to a tuple or list can also be provided, see :ref:`Properties`.
     Refer to `cmake(1) <https://cmake.org/cmake/help/latest/manual/cmake.1.html>`_ for more information.
 
 ``cmake``
@@ -2194,7 +2196,7 @@ Transferring Multiple Files At Once
 
 In addition to the :bb:step:`FileUpload` and :bb:step:`DirectoryUpload` steps there is the :bb:step:`MultipleFileUpload` step for uploading a bunch of files (and directories) in a single :class:`BuildStep`.
 The step supports all arguments that are supported by :bb:step:`FileUpload` and :bb:step:`DirectoryUpload`, but instead of a the single ``workersrc`` parameter it takes a (plural) ``workersrcs`` parameter.
-This parameter should either be a list, or something that can be rendered as a list.
+This parameter should either be a list, something that can be rendered as a list or a string which will be converted to a list.
 Additionally it supports the ``glob`` parameter if this parameter is set to ``True`` all arguments in ``workersrcs`` will be parsed through ``glob`` and the results will be uploaded to ``masterdest``.::
 
     from buildbot.plugins import steps
@@ -2343,6 +2345,15 @@ LogRenderable
 
 This build step takes content which can be renderable and logs it in a pretty-printed format.
 It can be useful for debugging properties during a build.
+
+.. bb:step:: Assert
+
+Assert
+++++++
+
+.. py:class:: buildbot.steps.master.Assert
+
+This build step takes a Renderable or constant passed in as first argument. It will test if the expression evaluates to ``True`` and succeed the step or fail the step otherwise.
 
 .. index:: Properties; from steps
 
