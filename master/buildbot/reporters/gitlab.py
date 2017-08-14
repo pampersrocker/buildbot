@@ -126,10 +126,10 @@ class GitLabStatusPush(http.HttpStatusPushBase):
                 WARNINGS: 'success',
                 FAILURE: 'failed',
                 SKIPPED: 'success',
-                EXCEPTION: 'error',
+                EXCEPTION: 'failed',
                 RETRY: 'pending',
-                CANCELLED: 'error'
-            }.get(build['results'], 'error')
+                CANCELLED: 'failed'
+            }.get(build['results'], 'failed')
             description = yield props.render(self.endDescription)
         else:
             state = 'running'
