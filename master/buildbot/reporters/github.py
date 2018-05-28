@@ -33,6 +33,7 @@ from buildbot.process.results import WARNINGS
 from buildbot.reporters import http
 from buildbot.util import httpclientservice
 from buildbot.util import unicode2NativeString
+from buildbot.util.giturlparse import giturlparse
 
 HOSTED_BASE_URL = 'https://api.github.com'
 
@@ -45,6 +46,7 @@ class GitHubStatusPush(http.HttpStatusPushBase):
     def reconfigService(self, token,
                         startDescription=None, endDescription=None,
                         context=None, baseURL=None, verbose=False, **kwargs):
+        token = yield self.renderSecrets(token)
         yield http.HttpStatusPushBase.reconfigService(self, **kwargs)
 
         self.setDefaults(context, startDescription, endDescription)
@@ -102,6 +104,7 @@ class GitHubStatusPush(http.HttpStatusPushBase):
     @defer.inlineCallbacks
     def send(self, build):
         props = Properties.fromDict(build['properties'])
+        props.master = self.master
 
         if build['complete']:
             state = {
@@ -136,12 +139,16 @@ class GitHubStatusPush(http.HttpStatusPushBase):
         else:
             issue = None
 
-        if project:
+        if "/" in project:
             repoOwner, repoName = project.split('/')
         else:
-            repo = sourcestamps[0]['repository'].split('/')[-2:]
-            repoOwner = repo[0]
-            repoName = '.'.join(repo[1].split('.')[:-1])
+            giturl = giturlparse(sourcestamps[0]['repository'])
+            repoOwner = giturl.owner
+            repoName = giturl.repo
+
+        if self.verbose:
+            log.msg("Updating github status: repoOwner={repoOwner}, repoName={repoName}".format(
+                repoOwner=repoOwner, repoName=repoName))
 
         for sourcestamp in sourcestamps:
             sha = sourcestamp['revision']
@@ -166,15 +173,17 @@ class GitHubStatusPush(http.HttpStatusPushBase):
                 )
                 if self.verbose:
                     log.msg(
-                        'Updated status with "{state}" for '
-                        '{repoOwner}/{repoName} at {sha}, issue {issue}.'.format(
-                            state=state, repoOwner=repoOwner, repoName=repoName, sha=sha, issue=issue))
+                        'Updated status with "{state}" for {repoOwner}/{repoName} '
+                        'at {sha}, context "{context}", issue {issue}.'.format(
+                            state=state, repoOwner=repoOwner, repoName=repoName,
+                            sha=sha, issue=issue, context=context))
             except Exception as e:
                 log.err(
                     e,
-                    'Failed to update "{state}" for '
-                    '{repoOwner}/{repoName} at {sha}, issue {issue}'.format(
-                        state=state, repoOwner=repoOwner, repoName=repoName, sha=sha, issue=issue))
+                    'Failed to update "{state}" for {repoOwner}/{repoName} '
+                    'at {sha}, context "{context}", issue {issue}.'.format(
+                        state=state, repoOwner=repoOwner, repoName=repoName,
+                        sha=sha, issue=issue, context=context))
 
 
 class GitHubCommentPush(GitHubStatusPush):

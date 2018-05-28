@@ -157,11 +157,11 @@ extlinks = {
     #   "https://github.com/buildbot/buildbot/blob/master/master".
     # Explicit title can be used for customizing how link looks like:
     #   :src-link:`master's directory <master>`
-    'src-link': ('https://github.com/buildbot/buildbot/blob/master/%s', None),
+    'src-link': ('https://github.com/buildbot/buildbot/tree/master/%s', None),
     # "pretty" reference that looks like relative path in Buildbot source tree
     # by default.
-    'src': ('https://github.com/buildbot/buildbot/blob/master/%s', ''),
-    'contrib-src': ('https://github.com/buildbot/buildbot-contrib/blob/master/%s', ''),
+    'src': ('https://github.com/buildbot/buildbot/tree/master/%s', ''),
+    'contrib-src': ('https://github.com/buildbot/buildbot-contrib/tree/master/%s', ''),
 }
 
 # Sphinx' link checker.
@@ -211,12 +211,12 @@ html_theme_path = [
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = os.path.join('_images', 'header-text-transparent.png')
+html_logo = os.path.join('_images', 'full_logo.png')
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
-# pixels large.
-html_favicon = os.path.join('_static', 'buildbot.ico')
+# pixels large or a png.
+html_favicon = os.path.join('_static', 'icon.png')
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

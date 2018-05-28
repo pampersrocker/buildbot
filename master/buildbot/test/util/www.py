@@ -15,8 +15,8 @@
 
 from __future__ import absolute_import
 from __future__ import print_function
-from future.moves.urllib.parse import unquote as urlunquote
 from future.moves.urllib.parse import parse_qs
+from future.moves.urllib.parse import unquote as urlunquote
 from future.utils import integer_types
 from future.utils import iteritems
 
@@ -101,9 +101,12 @@ class FakeRequest(object):
         self.responseText = text
 
     def setHeader(self, hdr, value):
+        assert isinstance(hdr, bytes)
+        assert isinstance(value, bytes)
         self.headers.setdefault(hdr, []).append(value)
 
     def getHeader(self, key):
+        assert isinstance(key, bytes)
         return self.input_headers.get(key)
 
     def processingFailed(self, f):
@@ -218,7 +221,8 @@ class WwwTestMixin(RequiresWwwMixin):
             got['content'] = self.request.written
             exp['content'] = content
         if contentJson is not None:
-            got['contentJson'] = json.loads(bytes2NativeString(self.request.written))
+            got['contentJson'] = json.loads(
+                bytes2NativeString(self.request.written))
             exp['contentJson'] = contentJson
         if contentType is not None:
             got['contentType'] = self.request.headers[b'content-type']

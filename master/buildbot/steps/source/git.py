@@ -140,6 +140,7 @@ class Git(Source):
         self.getDescription = getDescription
         self.config = config
         self.supportsBranch = True
+        self.supportsSubmoduleForce = True
         self.supportsSubmoduleCheckout = True
         self.srcdir = 'source'
         self.origin = origin
@@ -421,7 +422,7 @@ class Git(Source):
         # Rename the branch if needed.
         if res == RC_SUCCESS and self.branch != 'HEAD':
             # Ignore errors
-            yield self._dovccmd(['branch', '-M', self.branch], abandonOnFailure=False)
+            yield self._dovccmd(['checkout', '-B', self.branch], abandonOnFailure=False)
 
         defer.returnValue(res)
 
@@ -553,7 +554,9 @@ class Git(Source):
     def _updateSubmodule(self, _=None):
         rc = RC_SUCCESS
         if self.submodules:
-            vccmd = ['submodule', 'update', '--init', '--recursive', '--force']
+            vccmd = ['submodule', 'update', '--init', '--recursive']
+            if self.supportsSubmoduleForce:
+                vccmd.extend(['--force'])
             if self.supportsSubmoduleCheckout:
                 vccmd.extend(['--checkout'])
             rc = yield self._dovccmd(vccmd)
@@ -583,11 +586,17 @@ class Git(Source):
         stdout = yield self._dovccmd(['--version'], collectStdout=True)
 
         gitInstalled = False
+        version = "0.0.0"
         if 'git' in stdout:
             gitInstalled = True
-        version = stdout.strip().split(' ')[2]
+            try:
+                version = stdout.strip().split(' ')[2]
+            except IndexError:
+                gitInstalled = False
         if LooseVersion(version) < LooseVersion("1.6.5"):
             self.supportsBranch = False
+        if LooseVersion(version) < LooseVersion("1.7.6"):
+            self.supportsSubmoduleForce = False
         if LooseVersion(version) < LooseVersion("1.7.8"):
             self.supportsSubmoduleCheckout = False
         defer.returnValue(gitInstalled)

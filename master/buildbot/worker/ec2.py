@@ -201,6 +201,7 @@ class EC2LatentWorker(AbstractLatentWorker):
                 )
 
         self.ec2 = self.session.resource('ec2')
+        self.ec2_client = self.session.client('ec2')
 
         # Make a keypair
         #
@@ -231,7 +232,7 @@ class EC2LatentWorker(AbstractLatentWorker):
         # create security group
         if security_name:
             try:
-                self.ec2.SecurityGroup(security_name).load()
+                self.ec2_client.describe_security_groups(GroupNames=[security_name])
             except ClientError as e:
                 if 'InvalidGroup.NotFound' in str(e):
                     self.security_group = self.ec2.create_security_group(
@@ -412,9 +413,6 @@ class EC2LatentWorker(AbstractLatentWorker):
         self.instance = reservations[0]
         instance_id, start_time = self._wait_for_instance()
         if None not in [instance_id, image.id, start_time]:
-            if self.tags:
-                self.instance.create_tags(Tags=[{"Key": k, "Value": v}
-                                                for k, v in self.tags.items()])
             return [instance_id, image.id, start_time]
         else:
             self.failed_to_start(self.instance.id, self.instance.state['Name'])
@@ -557,6 +555,9 @@ class EC2LatentWorker(AbstractLatentWorker):
                 minutes // 60, minutes % 60, seconds)
             if self.volumes:
                 self._attach_volumes()
+            if self.tags:
+                self.instance.create_tags(Tags=[{"Key": k, "Value": v}
+                                                for k, v in self.tags.items()])
             return self.instance.id, start_time
         else:
             self.failed_to_start(self.instance.id, self.instance.state['Name'])
@@ -598,5 +599,8 @@ class EC2LatentWorker(AbstractLatentWorker):
             log.msg('%s %s failed to fulfill spot request %s with status %s' %
                     (self.__class__.__name__, self.workername,
                      request['SpotInstanceRequestId'], request_status))
+            # try to cancel, just for good measure
+            self.ec2.meta.client.cancel_spot_instance_requests(
+                SpotInstanceRequestIds=[request['SpotInstanceRequestId']])
             raise LatentWorkerFailedToSubstantiate(
                 request['SpotInstanceRequestId'], request_status)

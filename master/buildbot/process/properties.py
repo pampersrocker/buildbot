@@ -68,6 +68,53 @@ class Properties(util.ComparableMixin):
         self._used_secrets = {}
         if kwargs:
             self.update(kwargs, "TEST")
+        self._master = None
+        self._sourcestamps = None
+        self._changes = None
+
+    @property
+    def master(self):
+        if self.build is not None:
+            return self.build.master
+        return self._master
+
+    @master.setter
+    def master(self, value):
+        self._master = value
+
+    @property
+    def sourcestamps(self):
+        if self.build is not None:
+            return [b.asSSDict() for b in self.build.getAllSourceStamps()]
+        elif self._sourcestamps is not None:
+            return self._sourcestamps
+        raise AttributeError('neither build nor _sourcestamps are set')
+
+    @sourcestamps.setter
+    def sourcestamps(self, value):
+        self._sourcestamps = value
+
+    @property
+    def changes(self):
+        if self.build is not None:
+            return [c.asChDict() for c in self.build.allChanges()]
+        elif self._changes is not None:
+            return self._changes
+        raise AttributeError('neither build nor _changes are set')
+
+    @changes.setter
+    def changes(self, value):
+        self._changes = value
+
+    @property
+    def files(self):
+        if self.build is not None:
+            return self.build.allFiles()
+        files = []
+        # self.changes, not self._changes to raise AttributeError if unset
+        for chdict in self.changes:
+            files.extend(chdict['files'])
+        return files
 
     @classmethod
     def fromDict(cls, propDict):
@@ -145,9 +192,9 @@ class Properties(util.ComparableMixin):
     has_key = hasProperty
 
     def setProperty(self, name, value, source, runtime=False):
-        name = util.ascii2unicode(name)
+        name = util.bytes2unicode(name)
         json.dumps(value)  # Let the exception propagate ...
-        source = util.ascii2unicode(source)
+        source = util.bytes2unicode(source)
 
         self.properties[name] = (value, source)
         if runtime:
@@ -440,17 +487,40 @@ class _SecretRenderer(object):
 
     @defer.inlineCallbacks
     def getRenderingFor(self, properties):
-        secretsSrv = properties.getBuild().master.namedServices.get("secrets")
+        secretsSrv = properties.master.namedServices.get("secrets")
         if not secretsSrv:
             error_message = "secrets service not started, need to configure" \
                             " SecretManager in c['services'] to use 'secrets'" \
                             "in Interpolate"
             raise KeyError(error_message)
-        credsservice = properties.getBuild().master.namedServices['secrets']
+        credsservice = properties.master.namedServices['secrets']
         secret_detail = yield credsservice.get(self.secret_name)
         if secret_detail is None:
             raise KeyError("secret key %s is not found in any provider" % self.secret_name)
         properties.useSecret(secret_detail.value, self.secret_name)
+        defer.returnValue(secret_detail.value)
+
+
+class Secret(_SecretRenderer):
+
+    def __repr__(self):
+        return "Secret({0})".format(self.secretKey)
+
+    def __init__(self, secretKey):
+        self.secretKey = secretKey
+
+    @defer.inlineCallbacks
+    def getRenderingFor(self, props):
+        secretsSrv = props.master.namedServices.get("secrets")
+        if not secretsSrv:
+            error_message = "secrets service not started, need to configure" \
+                            " SecretManager in c['services'] to use 'secrets'" \
+                            "in Interpolate"
+            raise KeyError(error_message)
+        credsservice = props.master.namedServices['secrets']
+        secret_detail = yield credsservice.get(self.secretKey)
+        if secret_detail is None:
+            raise KeyError("secret key %s is not found in any provider" % self.secretKey)
         defer.returnValue(secret_detail.value)
 
 

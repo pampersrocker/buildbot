@@ -64,6 +64,10 @@ These are the same details set in either environment variables or passed as opti
 
 ``os_tenant_name``
 
+``os_user_domain``
+
+``os_project_domain``
+
 ``os_auth_url``
     The OpenStack authentication needed to create and delete instances.
     These are the same as the environment variables with uppercase names of the arguments.
@@ -116,6 +120,10 @@ These are the same details set in either environment variables or passed as opti
     Use ``1.1`` for the previous, deprecated, version.
     If using ``1.1``, note that an older version of novaclient will be needed so it won't switch to using ``2``.
 
+``region``
+    (optional)
+    A string specifying region where to instantiate the worker.
+
 Here is the simplest example of configuring an OpenStack latent worker.
 
 ::
@@ -143,7 +151,7 @@ The invocation happens in a separate thread to prevent blocking the build master
             return x.created
 
         candidate_images = sorted(images, key=key_fn)
-        # Return the oldest candiate image.
+        # Return the oldest candidate image.
         return candidate_images[0]
 
     c['workers'] = [

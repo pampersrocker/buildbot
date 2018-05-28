@@ -55,7 +55,7 @@ MySQL
 
 .. code-block:: python
 
-   c['db_url'] = "mysql://user:pass@example.com/database_name?max_idle=300"
+   c['db_url'] = "mysql://username:password@example.com/database_name?max_idle=300"
 
 The ``max_idle`` argument for MySQL connections is unique to Buildbot, and should be set to something less than the ``wait_timeout`` configured for your server.
 This controls the SQLAlchemy ``pool_recycle`` parameter, which defaults to no timeout.
@@ -76,7 +76,7 @@ Postgres
 
 .. code-block:: python
 
-    c['db_url'] = "postgresql://username@hostname/dbname"
+    c['db_url'] = "postgresql://username:password@hostname/dbname"
 
 PosgreSQL requires no special configuration.
 
@@ -91,7 +91,7 @@ Buildbot uses a message-queueing system to handle communication within the maste
 Messages are used to indicate events within the master, and components that are interested in those events arrange to receive them.
 
 The message queueing implementation is configured as a dictionary in the ``mq`` option.
-The ``type`` key describes the type of MQ implemetation to be used.
+The ``type`` key describes the type of MQ implementation to be used.
 Note that the implementation type cannot be changed in a reconfig.
 
 The available implemenetation types are described in the following sections.
@@ -245,7 +245,7 @@ This setting has no impact on status plugins, and merely affects the required di
 The :bb:cfg:`logCompressionMethod` controls what type of compression is used for build logs.
 The default is 'gz', and the other valid option are 'raw' (no compression), 'gz' or 'lz4' (required lz4 package).
 
-Please find below some stats extracted from 50x "Pyflakes" runs (results may differ according to log type).
+Please find below some stats extracted from 50x "trial Pyflakes" runs (results may differ according to log type).
 
 .. csv-table:: Space saving details
    :header: "compression", "raw log size", "compressed log size", "space saving", "compression speed"
@@ -423,7 +423,7 @@ This might be useful if you only run workers on the same machine, and they are a
 .. note::
 
    In Buildbot versions <=0.8.8 you might see ``slavePortnum`` option.
-   This option contains same value as ``c['protocols']['pb']['port']`` but not recomended to use.
+   This option contains same value as ``c['protocols']['pb']['port']`` but not recommended to use.
 
 .. index:: Properties; global
 

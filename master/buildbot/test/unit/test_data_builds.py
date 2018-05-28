@@ -31,13 +31,6 @@ from buildbot.test.util import interfaces
 from buildbot.util import epoch2datetime
 
 
-# override resultSpec implementation to be noop
-class MockedResultSpec(resultspec.ResultSpec):
-
-    def apply(self, data):
-        return data
-
-
 class BuildEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     endpointClass = builds.BuildEndpoint
@@ -102,7 +95,7 @@ class BuildEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_properties_injection(self):
-        resultSpec = MockedResultSpec(
+        resultSpec = resultspec.OptimisedResultSpec(
             filters=[resultspec.Filter('property', 'eq', [False])])
         build = yield self.callGet(('builders', 77, 'builds', 5), resultSpec=resultSpec)
         self.validateData(build)
@@ -142,6 +135,7 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
         self.db.insertTestData([
             fakedb.Builder(id=77, name='builder77'),
             fakedb.Builder(id=78, name='builder78'),
+            fakedb.Builder(id=79, name='builder79'),
             fakedb.Master(id=88),
             fakedb.Worker(id=13, name='wrk'),
             fakedb.Buildset(id=8822),
@@ -152,6 +146,8 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
                          buildrequestid=82, number=4),
             fakedb.Build(id=15, builderid=78, masterid=88, workerid=12,
                          buildrequestid=83, number=5, complete_at=1),
+            fakedb.Build(id=16, builderid=79, masterid=88, workerid=12,
+                         buildrequestid=84, number=6, complete_at=1),
         ])
 
     def tearDown(self):
@@ -162,7 +158,7 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
         builds = yield self.callGet(('builds',))
         [self.validateData(build) for build in builds]
         self.assertEqual(sorted([b['number'] for b in builds]),
-                         [3, 4, 5])
+                         [3, 4, 5, 6])
 
     @defer.inlineCallbacks
     def test_get_builder(self):
@@ -194,7 +190,7 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_get_buildrequest_via_filter(self):
-        resultSpec = MockedResultSpec(
+        resultSpec = resultspec.OptimisedResultSpec(
             filters=[resultspec.Filter('buildrequestid', 'eq', [82])])
         builds = yield self.callGet(('builds',), resultSpec=resultSpec)
         [self.validateData(build) for build in builds]
@@ -202,7 +198,7 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_get_buildrequest_via_filter_with_string(self):
-        resultSpec = MockedResultSpec(
+        resultSpec = resultspec.OptimisedResultSpec(
             filters=[resultspec.Filter('buildrequestid', 'eq', ['82'])])
         builds = yield self.callGet(('builds',), resultSpec=resultSpec)
         [self.validateData(build) for build in builds]
@@ -216,7 +212,7 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_get_complete(self):
-        resultSpec = MockedResultSpec(
+        resultSpec = resultspec.OptimisedResultSpec(
             filters=[resultspec.Filter('complete', 'eq', [False])])
         builds = yield self.callGet(('builds',), resultSpec=resultSpec)
         [self.validateData(build) for build in builds]
@@ -224,7 +220,7 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_get_complete_at(self):
-        resultSpec = MockedResultSpec(
+        resultSpec = resultspec.OptimisedResultSpec(
             filters=[resultspec.Filter('complete_at', 'eq', [None])])
         builds = yield self.callGet(('builds',), resultSpec=resultSpec)
         [self.validateData(build) for build in builds]
@@ -232,12 +228,28 @@ class BuildsEndpoint(endpoint.EndpointMixin, unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_properties_injection(self):
-        resultSpec = MockedResultSpec(
+        resultSpec = resultspec.OptimisedResultSpec(
             filters=[resultspec.Filter('property', 'eq', [False])])
         builds = yield self.callGet(('builds',), resultSpec=resultSpec)
         for b in builds:
             self.validateData(b)
             self.assertIn('properties', b)
+
+    @defer.inlineCallbacks
+    def test_get_filter_eq(self):
+        resultSpec = resultspec.OptimisedResultSpec(
+            filters=[resultspec.Filter('builderid', 'eq', [78, 79])])
+        builds = yield self.callGet(('builds',), resultSpec=resultSpec)
+        [self.validateData(b) for b in builds]
+        self.assertEqual(sorted([b['number'] for b in builds]), [5, 6])
+
+    @defer.inlineCallbacks
+    def test_get_filter_ne(self):
+        resultSpec = resultspec.OptimisedResultSpec(
+            filters=[resultspec.Filter('builderid', 'ne', [78, 79])])
+        builds = yield self.callGet(('builds',), resultSpec=resultSpec)
+        [self.validateData(b) for b in builds]
+        self.assertEqual(sorted([b['number'] for b in builds]), [3, 4])
 
 
 class Build(interfaces.InterfaceTests, unittest.TestCase):

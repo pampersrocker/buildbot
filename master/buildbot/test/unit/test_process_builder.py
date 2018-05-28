@@ -24,10 +24,15 @@ import mock
 
 from twisted.internet import defer
 from twisted.trial import unittest
+from zope.interface import implementer
 
 from buildbot import config
+from buildbot import interfaces
+from buildbot import locks
 from buildbot.process import builder
 from buildbot.process import factory
+from buildbot.process.properties import Properties
+from buildbot.process.properties import renderer
 from buildbot.test.fake import fakedb
 from buildbot.test.fake import fakemaster
 from buildbot.test.util.warnings import assertNotProducesWarnings
@@ -344,6 +349,7 @@ class TestBuilder(BuilderMixin, unittest.TestCase):
 
         self.assertIdentical(new, old)
 
+    @defer.inlineCallbacks
     def test_canStartWithWorkerForBuilder_old_api(self):
         bldr = builder.Builder('bldr')
         bldr.config = mock.Mock()
@@ -355,8 +361,85 @@ class TestBuilder(BuilderMixin, unittest.TestCase):
             with mock.patch(
                     'buildbot.process.build.Build.canStartWithWorkerForBuilder',
                     mock.Mock(return_value='dummy')):
-                dummy = bldr.canStartWithSlavebuilder(mock.Mock())
+                dummy = yield bldr.canStartWithSlavebuilder(mock.Mock(), mock.Mock())
                 self.assertEqual(dummy, 'dummy')
+
+    @defer.inlineCallbacks
+    def test_canStartWithWorkerForBuilder_no_buildrequests(self):
+        bldr = builder.Builder('bldr')
+        bldr.config = mock.Mock()
+        bldr.config.locks = []
+
+        with assertProducesWarning(
+                Warning,
+                message_pattern=(
+                    "Not passing corresponding buildrequests to "
+                    "Builder.canStartWithWorkerForBuilder is deprecated")):
+            with mock.patch(
+                    'buildbot.process.build.Build.canStartWithWorkerForBuilder',
+                    mock.Mock(return_value='dummy')):
+                dummy = yield bldr.canStartWithWorkerForBuilder(mock.Mock())
+                self.assertEqual(dummy, 'dummy')
+
+    @defer.inlineCallbacks
+    def test_canStartWithWorkerForBuilder_renderableLocks_no_buildrequests(self):
+        bldr = builder.Builder('bldr')
+        bldr.config = mock.Mock()
+
+        @renderer
+        def rendered_locks(props):
+            return []
+
+        bldr.config.locks = rendered_locks
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'buildrequests parameter must be specified .+'):
+            with mock.patch(
+                    'buildbot.process.build.Build.canStartWithWorkerForBuilder',
+                    mock.Mock(return_value='dummy')):
+                yield bldr.canStartWithWorkerForBuilder(mock.Mock())
+
+    @defer.inlineCallbacks
+    def test_canStartWithWorkerForBuilder_renderableLocks(self):
+
+        @implementer(interfaces.IProperties)
+        class FakeProperties(mock.Mock):
+            def __iter__(self):
+                return iter([])
+
+        bldr = builder.Builder('bldr')
+        bldr.config = mock.Mock()
+        bldr.botmaster = mock.Mock()
+        bldr.botmaster.getLockFromLockAccess = mock.Mock(return_value='dummy')
+
+        lock1 = mock.Mock(spec=locks.MasterLock)
+        lock1.name = "masterlock"
+
+        lock2 = mock.Mock(spec=locks.WorkerLock)
+        lock2.name = "workerlock"
+
+        renderedLocks = [False]
+
+        @renderer
+        def rendered_locks(props):
+            renderedLocks[0] = True
+            access1 = locks.LockAccess(lock1, 'counting')
+            access2 = locks.LockAccess(lock2, 'exclusive')
+            return [access1, access2]
+
+        bldr.config.locks = rendered_locks
+
+        with mock.patch(
+                'buildbot.process.build.Build.canStartWithWorkerForBuilder',
+                mock.Mock(return_value='dummy')):
+            with mock.patch(
+                    'buildbot.process.build.Build.setupPropertiesKnownBeforeBuildStarts',
+                    mock.Mock()):
+                dummy = yield bldr.canStartWithWorkerForBuilder(mock.Mock(), [mock.Mock()])
+                self.assertEqual(dummy, 'dummy')
+
+        self.assertTrue(renderedLocks[0])
 
     def test_addLatentWorker_old_api(self):
         bldr = builder.Builder('bldr')
@@ -395,6 +478,19 @@ class TestBuilder(BuilderMixin, unittest.TestCase):
             deprecated = self.bldr.expectations
 
         self.assertIdentical(deprecated, None)
+
+    @defer.inlineCallbacks
+    def test_defaultProperties(self):
+        props = Properties()
+        props.setProperty('foo', 1, 'Scheduler')
+        props.setProperty('bar', 'bleh', 'Change')
+
+        yield self.makeBuilder(defaultProperties={'bar': 'onoes', 'cuckoo': 42})
+
+        self.bldr.setupProperties(props)
+
+        self.assertEquals(props.getProperty('bar'), 'bleh')
+        self.assertEquals(props.getProperty('cuckoo'), 42)
 
 
 class TestGetBuilderId(BuilderMixin, unittest.TestCase):
@@ -468,6 +564,46 @@ class TestGetOldestRequestTime(BuilderMixin, unittest.TestCase):
     def test_gort_all_claimed(self):
         yield self.makeBuilder(name='bldr2')
         rqtime = yield self.bldr.getOldestRequestTime()
+        self.assertEqual(rqtime, None)
+
+
+class TestGetNewestCompleteTime(BuilderMixin, unittest.TestCase):
+
+    @defer.inlineCallbacks
+    def setUp(self):
+        self.setUpBuilderMixin()
+
+        # a collection of rows that would otherwise clutter up every test
+        master_id = fakedb.FakeBuildRequestsComponent.MASTER_ID
+        self.base_rows = [
+            fakedb.SourceStamp(id=21),
+            fakedb.Buildset(id=11, reason='because'),
+            fakedb.BuildsetSourceStamp(buildsetid=11, sourcestampid=21),
+            fakedb.Builder(id=77, name='bldr1'),
+            fakedb.Builder(id=78, name='bldr2'),
+            fakedb.BuildRequest(id=111, submitted_at=1000, complete_at=1000,
+                                builderid=77, buildsetid=11),
+            fakedb.BuildRequest(id=222, submitted_at=2000, complete_at=4000,
+                                builderid=77, buildsetid=11),
+            fakedb.BuildRequest(id=333, submitted_at=3000, complete_at=3000,
+                                builderid=77, buildsetid=11),
+            fakedb.BuildRequest(id=444, submitted_at=2500,
+                                builderid=78, buildsetid=11),
+            fakedb.BuildRequestClaim(brid=444, masterid=master_id,
+                                     claimed_at=2501),
+        ]
+        yield self.db.insertTestData(self.base_rows)
+
+    @defer.inlineCallbacks
+    def test_gnct_completed(self):
+        yield self.makeBuilder(name='bldr1')
+        rqtime = yield self.bldr.getNewestCompleteTime()
+        self.assertEqual(rqtime, epoch2datetime(4000))
+
+    @defer.inlineCallbacks
+    def test_gnct_no_completed(self):
+        yield self.makeBuilder(name='bldr2')
+        rqtime = yield self.bldr.getNewestCompleteTime()
         self.assertEqual(rqtime, None)
 
 

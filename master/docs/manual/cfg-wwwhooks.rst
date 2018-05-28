@@ -17,9 +17,11 @@ An example www configuration line which enables change_hook and two DIALECTS:
         change_hook_dialects={
                               'base': True,
                               'somehook': {'option1':True,
-                                           'option2':False}}))
+                                           'option2':False},
+        },
+    )
 
-Within the www config dictionary arguments, the ``change_hook`` key enables/disables the module and ``change_hook_dialects`` whitelists DIALECTs where the keys are the module names and the values are optional arguments which will be passed to the hooks.
+Within the ``www`` config dictionary arguments, the ``change_hook`` key enables/disables the module and ``change_hook_dialects`` whitelists DIALECTs where the keys are the module names and the values are optional arguments which will be passed to the hooks.
 
 The :contrib-src:`master/contrib/post_build_request.py` script allows for the submission of an arbitrary change request.
 Run :command:`post_build_request.py --help` for more information.
@@ -44,17 +46,17 @@ To protect URL against unauthorized access you you may use ``change_hook_auth`` 
 
     from twisted.cred import strcred
     c['www'] = dict(...,
-          change_hook_auth=[strcred.makeChecker("file:changehook.passwd")]))
+          change_hook_auth=[strcred.makeChecker("file:changehook.passwd")],
+    )
 
-create a file ``changehook.passwd``:
+create a file ``changehook.passwd`` with content:
 
 .. code-block:: none
 
     user:password
 
-* ``change_hook_auth`` should be a list of :py:class:`ICredentialsChecker`
-
-See the details of available options in `Twisted documentation <https://twistedmatrix.com/documents/current/core/howto/cred.html>`_
+``change_hook_auth`` should be a list of :py:class:`ICredentialsChecker`.
+See the details of available options in `Twisted documentation <https://twistedmatrix.com/documents/current/core/howto/cred.html>`_.
 
 .. bb:chsrc:: Mercurial
 
@@ -77,7 +79,7 @@ Once this is configured on your buildmaster add the following hook on your serve
     [hooks]
     changegroup.buildbot = python:/path/to/hgbuildbot.py:hook
 
-You'll find ``hgbuildbot.py``, and its inline documentation, in the ``contrib`` directory of Buildbot's repository.
+You'll find :contrib-src:`master/contrib/hgbuildbot.py`, and its inline documentation, in the :contrib-src:`buildbot-contrib <../../>` repository.
 
 .. bb:chsrc:: GitHub
 
@@ -87,7 +89,7 @@ GitHub hook
 .. note::
 
    There is a standalone HTTP server available for receiving GitHub notifications as well: :contrib-src:`master/contrib/github_buildbot.py`.
-   This script may be useful in cases where you cannot expose the WebStatus for public consumption.
+   This script may be useful in cases where you cannot expose the WebStatus for public consumption. Alternatively, you can setup a reverse proxy :ref:`Reverse_Proxy_Config`
 
 The GitHub hook has the following parameters:
 
@@ -102,12 +104,12 @@ The GitHub hook has the following parameters:
     If the value is a function (or any other callable), it will be called with the GitHub event payload as argument and the function must return the codebase value to use for the event.
 ``class`` (default `None`)
     A class to be used for processing incoming payloads.
-    If the value is `None` (default), the default class -- :py:class:`buildbot.status.web.hooks.github.GitHubEventHandler` -- will be used.
+    If the value is `None` (default), the default class -- :py:class:`buildbot.www.hooks.github.GitHubEventHandler` -- will be used.
     The default class handles `ping`, `push` and `pull_request` events only.
-    If you'd like to handle other events (see `Event Types & Payloads <https://developer.github.com/v3/activity/events/types/>`_ for more information), you'd need to subclass `GitHubEventHandler` and add handler methods for the corresponding events.
+    If you'd like to handle other events (see `Event Types & Payloads <https://developer.github.com/v3/activity/events/types/>`_ for more information), you'd need to subclass ``GitHubEventHandler`` and add handler methods for the corresponding events.
     For example, if you'd like to handle `blah` events, your code should look something like this::
 
-        from buildbot.status.web.hooks.github import GitHubEventHandler
+        from buildbot.www.hooks.github import GitHubEventHandler
 
         class MyBlahHandler(GitHubEventHandler):
 
@@ -115,12 +117,27 @@ The GitHub hook has the following parameters:
                 # Do some magic here
                 return [], 'git'
 
+``skips`` (default ``[r'\[ *skip *ci *\]', r'\[ *ci *skip *\]']``)
+    A list of regex pattern makes buildbot ignore the push event.
+    For instance, if user push 3 commits and the commit message of branch head
+    contains a key string ``[ci skip]``, buildbot will ignore this push event.
+
+    If you want to disable the skip checking, please set it to ``[]``.
+
+``github_api_endpoint`` (default ``https://api.github.com``)
+    If you have a self-host GitHub Enterprise installation, please set
+    this url properly.
+
+``token``
+    If your GitHub or GitHub Enterprise instance does not allow anonymous communication, you need to provide an access token.  Instructions can be found here <https://help.github.com/articles/creating-a-personal-access-token-for-the-command-line/>
+
 The simplest way to use GitHub hook is as follows:
 
 .. code-block:: python
 
-    c['www'] = dict(...,
-        change_hook_dialects={'github': { }})
+    c['www'] = dict(
+        change_hook_dialects={'github': {}},
+    )
 
 Having added this line, you should add a webhook for your GitHub project (see `Creating Webhooks page at GitHub <https://developer.github.com/webhooks/creating/>`_).
 The parameters are:
@@ -144,15 +161,30 @@ The parameters are:
                 change_hook_dialects={
                     'github': {
                         'secret': 'MY-SECRET',
-                        'strict': True
-                    }
+                    },
                 },
-                ...))
+            )
 
 :guilabel:`Which events would you like to trigger this webhook?`
-    Leave the default -- ``Just the push [tag]  events`` -- other kind of events are not currently supported.
+    Click -- ``Let me select individual events``, then select ``Push`` and ``Pull request`` -- other kind of events are not currently supported.
 
 And then press the ``Add Webhook`` button.
+
+
+Github hook creates 3 kinds of changes, distinguishable by their ``category`` field:
+
+- ``None``: This change is a push to a branch.
+    Use ``util.ChangeFilter(category=None, repository="http://github.com/<org>/<project>")``
+
+- ``'tag'``: This change is a push to a tag.
+    Use ``util.ChangeFilter(category='tag', repository="http://github.com/<org>/<project>")``
+
+- ``'pull'``: This change is from a pull-request creation or update.
+    Use ``util.ChangeFilter(category='pull', repository="http://github.com/<org>/<project>")``
+    In this case, the :bb:step:`GitHub` step must be used instead of the standard :bb:step:`Git` in order to be able to pull GitHub's magic refs.
+    With this method, the :bb:step:`GitHub` step will always checkout the branch merged with latest master.
+    This allows to test the result of the merge instead of just the source branch.
+    Note that you can use the :bb:step:`GitHub` for all categories of event.
 
 .. warning::
 
@@ -164,9 +196,6 @@ Then change the the ``Payload URL`` of your GitHub webhook to ``https://user:pas
 
 Patches are welcome to implement: https://developer.github.com/webhooks/securing/
 
-.. note::
-
-   When using a :ref:`ChangeFilter<Change-Filters>` with a GitHub webhook ensure that your filter matches all desired requests as fields such as ``repository`` and ``project`` may differ in different events.
 
 .. bb:chsrc:: BitBucket
 
@@ -178,7 +207,8 @@ The BitBucket hook is as simple as GitHub one and it takes no options.
 .. code-block:: python
 
     c['www'] = dict(...,
-        change_hook_dialects={ 'bitbucket' : True }))
+        change_hook_dialects={'bitbucket': True},
+    )
 
 When this is setup you should add a `POST` service pointing to ``/change_hook/bitbucket`` relative to the root of the web status.
 For example, it the grid URL is ``http://builds.example.com/bbot/grid``, then point BitBucket to ``http://builds.example.com/change_hook/bitbucket``.
@@ -196,6 +226,30 @@ To protect URL against unauthorized access you should use :ref:`Change-Hooks-Aut
 Then, create a BitBucket service hook (see https://confluence.atlassian.com/display/BITBUCKET/POST+Service+Management) with a WebHook URL like ``https://user:password@builds.example.com/bbot/change_hook/bitbucket``.
 
 Note that as before, not using ``change_hook_auth`` can expose you to security risks.
+
+Bitbucket Cloud hook
++++++++++++++++++++++
+
+.. code-block:: python
+
+    c['www'] = dict(
+        ...,
+        change_hook_dialects={'bitbucketcloud': {}},
+    )
+
+When this is setup you should add a webhook pointing to ``/change_hook/bitbucketcloud`` relative to the root of the web status.
+
+According to the type of the event, the change category is set to ``push``, ``pull-created``, ``pull-rejected``, ``pull-updated``, ``pull-fulfilled`` or ``ref-deleted``.
+
+The Bitbucket Cloud hook may have the following optional parameters:
+
+``codebase`` (default `None`)
+    The codebase value to include with changes or a callable object that will be passed the payload in order to get it.
+
+.. Warning::
+    The incoming HTTP requests for this hook are not authenticated by default.
+    Anyone who can access the web server can "fake" a request from Bitbucket Cloud, potentially causing the buildmaster to run arbitrary code
+
 
 Bitbucket Server hook
 +++++++++++++++++++++
@@ -236,12 +290,13 @@ Suppose you have a poller configured like this::
         repourl="https://amanda.svn.sourceforge.net/svnroot/amanda/amanda",
         split_file=split_file_branches,
         pollInterval=24*60*60,
-        pollAtLaunch=True)
+        pollAtLaunch=True,
+    )
 
 And you configure your WebStatus to enable this hook::
 
     c['www'] = dict(...,
-        change_hook_dialects={'poller': True}
+        change_hook_dialects={'poller': True},
     )
 
 Then you will be able to trigger a poll of the SVN repository by poking the ``/change_hook/poller`` URL from a commit hook like this:
@@ -311,7 +366,7 @@ The Gitorious hook is as simple as GitHub one and it also takes no options.
 ::
 
     c['www'] = dict(...,
-        change_hook_dialects={'gitorious': True}
+        change_hook_dialects={'gitorious': True},
     )
 
 When this is setup you should add a `POST` service pointing to ``/change_hook/gitorious`` relative to the root of the web status.

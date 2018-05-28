@@ -40,7 +40,7 @@ class Follower(object):
 
     def _success(self, processtype):
         from twisted.internet import reactor
-        print("The %s appears to have (re)started correctly." % processtype)
+        print("The {0} appears to have (re)started correctly.".format(processtype))
         self.rc = 0
         reactor.stop()
 
@@ -126,25 +126,16 @@ def launch(nodaemon):
     # spawn twistd, since spawning processes correctly is a real hassle
     # on windows.
     from twisted.python.runtime import platformType
+    from twisted.scripts.twistd import run
     argv = ["twistd",
             "--no_save",
             "--logfile=twistd.log",  # windows doesn't use the same default
             "--python=buildbot.tac"]
     if nodaemon:
-        argv.extend(['--nodaemon'])
-    sys.argv = argv
+        argv.extend(["--nodaemon"])
+        if platformType != 'win32':
+            # windows doesn't use pidfile option.
+            argv.extend(["--pidfile="])
 
-    # this is copied from bin/twistd. twisted-2.0.0 through 2.4.0 use
-    # _twistw.run . Twisted-2.5.0 and later use twistd.run, even for
-    # windows.
-    from twisted import __version__
-    major, minor, ignored = __version__.split(".", 2)
-    major = int(major)
-    minor = int(minor)
-    if (platformType == "win32" and (major == 2 and minor < 5)):
-        from twisted.scripts import _twistw
-        run = _twistw.run
-    else:
-        from twisted.scripts import twistd
-        run = twistd.run
+    sys.argv = argv
     run()

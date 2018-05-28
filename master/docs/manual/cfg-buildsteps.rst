@@ -623,7 +623,7 @@ This step takes the following arguments:
 
 ``login``
     Password to use while performing login to the remote CVS server.
-    Default is ``None`` meaning that no login needs to be peformed.
+    Default is ``None`` meaning that no login needs to be performed.
 
 .. bb:step:: Bzr
 
@@ -818,6 +818,9 @@ The Repo step takes the following arguments:
     If not present the tarball will be created automatically after first sync.
     It is a copy of the ``.repo`` directory which contains all the Git objects.
     This feature helps to minimize network usage on very big projects with lots of workers.
+
+    The suffix of the tarball determines if the tarball is compressed and which compressor is chosen.
+    Supported suffixes are ``bz2``, ``gz``, ``lzma``, ``lzop``, and ``pigz``.
 
 ``jobs``
     (optional, defaults to ``None``): Number of projects to fetch simultaneously while syncing.
@@ -1130,7 +1133,7 @@ The :bb:step:`ShellCommand` arguments are:
     This option is not available on Windows.
 
     In general, you do not want to use a pseudo-terminal.
-    This is is *only* useful for running commands that require a terminal - for example, testing a command-line application that will only accept passwords read from a terminal.
+    This is *only* useful for running commands that require a terminal - for example, testing a command-line application that will only accept passwords read from a terminal.
     Using a pseudo-terminal brings lots of compatibility problems, and prevents Buildbot from distinguishing the standard error (red) and standard output (black) streams.
 
     In previous versions, the advantage of using a pseudo-terminal was that ``grandchild`` processes were more likely to be cleaned up if the build was interrupted or times out.
@@ -1413,6 +1416,11 @@ For example:
 
 If no line number range is specified, the pattern matches the whole file; if only one number is given it matches only on that line.
 
+The ``suppressionList=`` argument can be specified as a list of four-tuples as addition or instead of ``suppressionFile=``.
+The tuple should be ``[ FILE-RE, WARNING-RE, START, END ]``.
+If ``FILE-RE`` is ``None``, then the suppression applies to any file.
+``START`` and ``END`` can be specified as in suppression file, or ``None``.
+
 The default warningPattern regexp only matches the warning text, so line numbers and file names are ignored.
 To enable line number and file name matching, provide a different regexp and provide a function (callable) as the argument of ``warningExtractor=``.
 The function is called with three arguments: the :class:`BuildStep` object, the line in the log file with the warning, and the ``SRE_Match`` object of the regexp search for ``warningPattern``.
@@ -1445,6 +1453,7 @@ The defaults, which are suitable for GNU Make, are these::
 .. bb:step:: VC11
 .. bb:step:: VC12
 .. bb:step:: VC14
+.. bb:step:: VC141
 .. bb:step:: VS2003
 .. bb:step:: VS2005
 .. bb:step:: VS2008
@@ -1452,17 +1461,19 @@ The defaults, which are suitable for GNU Make, are these::
 .. bb:step:: VS2012
 .. bb:step:: VS2013
 .. bb:step:: VS2015
+.. bb:step:: VS2017
 .. bb:step:: VCExpress9
 .. bb:step:: MsBuild4
 .. bb:step:: MsBuild12
 .. bb:step:: MsBuild14
+.. bb:step:: MsBuild141
 
 Visual C++
 ++++++++++
 
 These steps are meant to handle compilation using Microsoft compilers.
-VC++ 6-14 (aka Visual Studio 2003-2015 and VCExpress9) are supported via calling ``devenv``.
-Msbuild as well as Windows Driver Kit 8 are supported via the ``MsBuild4``, ``MsBuild12``, and ``MsBuild14`` steps.
+VC++ 6-141 (aka Visual Studio 2003-2015 and VCExpress9) are supported via calling ``devenv``.
+Msbuild as well as Windows Driver Kit 8 are supported via the ``MsBuild4``, ``MsBuild12``, ``MsBuild14`` and  ``MsBuild141`` steps.
 These steps will take care of setting up a clean compilation environment, parsing the generated output in real time, and delivering as detailed as possible information about the compilation executed.
 
 All of the classes are in :mod:`buildbot.steps.vstudio`.
@@ -1476,6 +1487,7 @@ The available classes are:
 * ``VC11``
 * ``VC12``
 * ``VC14``
+* ``VC141``
 * ``VS2003``
 * ``VS2005``
 * ``VS2008``
@@ -1483,10 +1495,12 @@ The available classes are:
 * ``VS2012``
 * ``VS2013``
 * ``VS2015``
+* ``VS2017``
 * ``VCExpress9``
 * ``MsBuild4``
 * ``MsBuild12``
 * ``MsBuild14``
+* ``MsBuild141``
 
 The available constructor arguments are
 
@@ -2157,8 +2171,8 @@ For :bb:step:`FileUpload`, the ``urlText=`` argument allows you to specify the u
 
 .. bb:step:: DirectoryUpload
 
-Transfering Directories
-+++++++++++++++++++++++
+Transferring Directories
+++++++++++++++++++++++++
 
 .. py:class:: buildbot.steps.transfer.DirectoryUpload
 
@@ -2244,8 +2258,8 @@ The `uploadDone` method is called once for each uploaded file and can be used to
 .. bb:step:: JSONStringDownload
 .. bb:step:: JSONPropertiesDownload
 
-Transfering Strings
--------------------
+Transferring Strings
+--------------------
 
 .. py:class:: buildbot.steps.transfer.StringDownload
 .. py:class:: buildbot.steps.transfer.JSONStringDownload

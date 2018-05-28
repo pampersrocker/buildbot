@@ -25,9 +25,10 @@ from twisted.internet import task
 from twisted.python import failure
 from twisted.python import log
 from twisted.python import reflect
+from twisted.python.reflect import accumulateClassList
 
 from buildbot import util
-from buildbot.util import ascii2unicode
+from buildbot.util import bytes2unicode
 from buildbot.util import config
 from buildbot.util import unicode2bytes
 
@@ -173,13 +174,14 @@ class BuildbotService(AsyncMultiService, config.ConfiguredMixin, util.Comparable
     def __init__(self, *args, **kwargs):
         name = kwargs.pop("name", None)
         if name is not None:
-            self.name = ascii2unicode(name)
+            self.name = bytes2unicode(name)
         self.checkConfig(*args, **kwargs)
         if self.name is None:
             raise ValueError(
                 "%s: must pass a name to constructor" % type(self))
         self._config_args = args
         self._config_kwargs = kwargs
+        self.rendered = False
         AsyncMultiService.__init__(self)
 
     def getConfigDict(self):
@@ -189,15 +191,34 @@ class BuildbotService(AsyncMultiService, config.ConfiguredMixin, util.Comparable
                 'args': self._config_args,
                 'kwargs': self._config_kwargs}
 
+    @defer.inlineCallbacks
     def reconfigServiceWithSibling(self, sibling):
         # only reconfigure if sibling is configured differently.
         # sibling == self is using ComparableMixin's implementation
         # only compare compare_attrs
         if self.configured and sibling == self:
-            return defer.succeed(None)
+            defer.returnValue(None)
         self.configured = True
-        return self.reconfigService(*sibling._config_args,
-                                    **sibling._config_kwargs)
+        # render renderables in parallel
+        # Properties import to resolve cyclic import issue
+        from buildbot.process.properties import Properties
+        p = Properties()
+        p.master = self.master
+        # render renderables in parallel
+        secrets = []
+        kwargs = {}
+        accumulateClassList(self.__class__, 'secrets', secrets)
+        for k, v in sibling._config_kwargs.items():
+            if k in secrets:
+                # for non reconfigurable services, we force the attribute
+                v = yield p.render(v)
+                setattr(sibling, k, v)
+                setattr(self, k, v)
+            kwargs[k] = v
+
+        d = yield self.reconfigService(*sibling._config_args,
+                                       **kwargs)
+        defer.returnValue(d)
 
     def configureService(self):
         # reconfigServiceWithSibling with self, means first configuration
@@ -217,6 +238,17 @@ class BuildbotService(AsyncMultiService, config.ConfiguredMixin, util.Comparable
 
     def reconfigService(self, name=None, *args, **kwargs):
         return defer.succeed(None)
+
+    def renderSecrets(self, *args):
+        # Properties import to resolve cyclic import issue
+        from buildbot.process.properties import Properties
+        p = Properties()
+        p.master = self.master
+
+        if len(args) == 1:
+            return p.render(args[0])
+
+        return defer.gatherResults([p.render(s) for s in args], consumeErrors=True)
 
 
 class ClusteredBuildbotService(BuildbotService):
@@ -490,7 +522,7 @@ class BuildbotServiceManager(AsyncMultiService, config.ConfiguredMixin,
         for svc in reconfigurable_services:
             if not svc.name:
                 raise ValueError(
-                    "%r: child %r should have a defined name attribute", self, svc)
+                    "{}: child {} should have a defined name attribute".format(self, svc))
             config_sibling = new_by_name.get(svc.name)
             try:
                 yield svc.reconfigServiceWithSibling(config_sibling)

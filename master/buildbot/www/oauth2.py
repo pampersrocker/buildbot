@@ -52,10 +52,10 @@ class OAuth2LoginResource(auth.LoginResource):
 
     @defer.inlineCallbacks
     def renderLogin(self, request):
-        code = request.args.get(b"code", [""])[0]
-        token = request.args.get(b"token", [""])[0]
+        code = request.args.get(b"code", [b""])[0]
+        token = request.args.get(b"token", [b""])[0]
         if not token and not code:
-            url = request.args.get("redirect", [None])[0]
+            url = request.args.get(b"redirect", [None])[0]
             url = yield self.auth.getLoginURL(url)
             raise resource.Redirect(url)
         else:
@@ -69,7 +69,7 @@ class OAuth2LoginResource(auth.LoginResource):
             session = request.getSession()
             session.user_info = details
             session.updateSession(request)
-            state = request.args.get("state", [""])[0]
+            state = request.args.get(b"state", [b""])[0]
             if state:
                 for redirect in parse_qs(state).get('redirect', []):
                     raise resource.Redirect(self.auth.homeUri + "#" + redirect)
@@ -233,6 +233,8 @@ class GitHubAuth(OAuth2Auth):
             # setup for enterprise github
             if serverURL.endswith("/"):
                 serverURL = serverURL[:-1]
+            # v3 is accessible directly at /api/v3 for enterprise, but directly for SaaS..
+            self.resourceEndpoint = serverURL + '/api/v3'
 
             self.authUri = '{0}/login/oauth/authorize'.format(serverURL)
             self.tokenUri = '{0}/login/oauth/access_token'.format(serverURL)
@@ -248,9 +250,8 @@ class GitHubAuth(OAuth2Auth):
                 config.error(
                     'Retrieving team membership information using GitHubAuth is only '
                     'possible using GitHub api v4.')
-            self.apiResourceEndpoint = '{0}/api/v3'.format(self.serverURL)
         else:
-            self.apiResourceEndpoint = '{0}/graphql'.format(self.serverURL)
+            self.apiResourceEndpoint = self.serverURL + '/graphql'
         if getTeamsMembership:
             # GraphQL name aliases must comply with /^[_a-zA-Z][_a-zA-Z0-9]*$/
             self._orgname_slug_sub_re = re.compile(r'[^_a-zA-Z0-9]')
@@ -336,7 +337,8 @@ class GitHubAuth(OAuth2Auth):
                         # identical with the inclusion of the organization
                         # since different organizations might share a common
                         # team name
-                        teams.add('%s/%s' % (orgs_name_slug_mapping[org], node['node']['name']))
+                        if node['node'] is not None:
+                            teams.add('%s/%s' % (orgs_name_slug_mapping[org], node['node']['name']))
                 user_info['groups'].extend(sorted(teams))
         if self.debug:
             log.info('{klass} User Details: {user_info}',

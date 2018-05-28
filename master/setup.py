@@ -204,6 +204,7 @@ setup_args = {
         "buildbot.test.fake",
         "buildbot.test.fuzz",
         "buildbot.test.integration",
+        "buildbot.test.integration.interop",
         "buildbot.test.regressions",
         "buildbot.test.unit",
     ]),
@@ -330,6 +331,7 @@ setup_args = {
             ('buildbot.reporters.gerrit', ['GerritStatusPush']),
             ('buildbot.reporters.gerrit_verify_status',
              ['GerritVerifyStatusPush']),
+            ('buildbot.reporters.hipchat', ['HipChatStatusPush']),
             ('buildbot.reporters.http', ['HttpStatusPush']),
             ('buildbot.reporters.github', ['GitHubStatusPush', 'GitHubCommentPush']),
             ('buildbot.reporters.gitlab', ['GitLabStatusPush']),
@@ -365,7 +367,7 @@ setup_args = {
             ('buildbot.process.logobserver', ['LogLineObserver']),
             ('buildbot.process.properties', [
                 'FlattenList', 'Interpolate', 'Property', 'Transform',
-                'WithProperties', 'renderer']),
+                'WithProperties', 'renderer', 'Secret']),
             ('buildbot.process.properties', [
                 'CommandlineUserManager']),
             ('buildbot.revlinks', ['RevlinkMatch']),
@@ -373,8 +375,9 @@ setup_args = {
             ('buildbot.schedulers.forcesched', [
                 'AnyPropertyParameter', 'BooleanParameter',
                 'ChoiceStringParameter',
-                'CodebaseParameter', 'FixedParameter', 'InheritBuildParameter',
+                'CodebaseParameter', 'FileParameter', 'FixedParameter', 'InheritBuildParameter',
                 'IntParameter', 'NestedParameter', 'ParameterGroup',
+                'PatchParameter',
                 'StringParameter', 'TextParameter', 'UserNameParameter',
                 'WorkerChoiceParameter',
             ]),
@@ -390,7 +393,7 @@ setup_args = {
             ('buildbot.steps.shellsequence', ['ShellArg']),
             ('buildbot.www.avatar', ['AvatarGravatar']),
             ('buildbot.www.auth', [
-                'UserPasswordAuth', 'HTPasswdAuth', 'RemoteUserAuth']),
+                'UserPasswordAuth', 'HTPasswdAuth', 'RemoteUserAuth', 'CustomAuth']),
             ('buildbot.www.ldapuserinfo', ['LdapUserInfo']),
             ('buildbot.www.oauth2', [
                 'GoogleAuth', 'GitHubAuth', 'GitLabAuth', 'BitbucketAuth']),
@@ -399,7 +402,8 @@ setup_args = {
             ('buildbot.www.authz', [
                 'Authz', 'fnmatchStrMatcher', 'reStrMatcher']),
             ('buildbot.www.authz.roles', [
-                'RolesFromEmails', 'RolesFromGroups', 'RolesFromOwner', 'RolesFromUsername']),
+                'RolesFromEmails', 'RolesFromGroups', 'RolesFromOwner', 'RolesFromUsername',
+                'RolesFromDomain']),
             ('buildbot.www.authz.endpointmatchers', [
                 'AnyEndpointMatcher', 'StopBuildEndpointMatcher', 'ForceBuildEndpointMatcher',
                 'RebuildBuildEndpointMatcher', 'AnyControlEndpointMatcher', 'EnableSchedulerEndpointMatcher']),
@@ -411,6 +415,7 @@ setup_args = {
             ('buildbot.www.hooks.gitlab', ['gitlab']),
             ('buildbot.www.hooks.gitorious', ['gitorious']),
             ('buildbot.www.hooks.poller', ['poller']),
+            ('buildbot.www.hooks.bitbucketcloud', ['bitbucketcloud']),
             ('buildbot.www.hooks.bitbucketserver', ['bitbucketserver'])
         ])
     ]), {
@@ -428,10 +433,10 @@ setup_args = {
 if sys.platform == "win32":
     setup_args['zip_safe'] = False
 
-py_26 = sys.version_info[0] > 2 or (
-    sys.version_info[0] == 2 and sys.version_info[1] >= 6)
-if not py_26:
-    raise RuntimeError("Buildbot master requires at least Python-2.6")
+py_27 = sys.version_info[0] > 2 or (
+    sys.version_info[0] == 2 and sys.version_info[1] >= 7)
+if not py_27:
+    raise RuntimeError("Buildbot master requires at least Python-2.7")
 
 # pip<1.4 doesn't have the --pre flag, and will thus attempt to install alpha
 # and beta versions of Buildbot.  Prevent that from happening.
@@ -452,9 +457,9 @@ if 'a' in version or 'b' in version:
             raise RuntimeError(VERSION_MSG)
 
 if sys.version_info[0] >= 3:
-    twisted_ver = ">= 17.5.0"
+    twisted_ver = ">= 17.9.0"
 else:
-    twisted_ver = ">= 14.0.1"
+    twisted_ver = ">= 16.1.0"
 autobahn_ver = ">= 0.16.0"
 txaio_ver = ">= 2.2.2"
 
@@ -489,7 +494,6 @@ test_deps = [
     'moto',
     # txgithub required to run buildbot.status.github module tests
     'txgithub',
-    'ramlfications',
     'mock>=2.0.0',
 ]
 if sys.platform != 'win32':
@@ -516,6 +520,7 @@ setup_args['extras_require'] = {
         "buildbot-worker=={0}".format(bundle_version),
         "buildbot-waterfall-view=={0}".format(bundle_version),
         "buildbot-console-view=={0}".format(bundle_version),
+        "buildbot-grid-view=={0}".format(bundle_version),
     ],
     'tls': [
         'Twisted[tls] ' + twisted_ver,
@@ -533,7 +538,6 @@ setup_args['extras_require'] = {
         'sphinxcontrib-spelling',
         'pyenchant',
         'docutils>=0.8',
-        'ramlfications',
         'sphinx-jinja',
         'towncrier'
     ],

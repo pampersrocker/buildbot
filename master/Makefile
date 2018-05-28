@@ -1,7 +1,8 @@
 # developer utilities
 pylint:
-	pylint --rcfile=../common/pylintrc buildbot
-	pylint --rcfile=../common/pylintrc docs/conf.py
+	pylint -j4 --rcfile=../common/pylintrc buildbot
+	@test ! -f fail
+
 tutorial:
 	cd docs/tutorial; $(MAKE) html
 flake8:

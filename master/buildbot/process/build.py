@@ -136,10 +136,14 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
     def getAllSourceStamps(self):
         return list(self.sources)
 
-    def allChanges(self):
-        for s in self.sources:
+    @staticmethod
+    def allChangesFromSources(sources):
+        for s in sources:
             for c in s.changes:
                 yield c
+
+    def allChanges(self):
+        return Build.allChangesFromSources(self.sources)
 
     def allFiles(self):
         # return a list of all source files that were changed
@@ -154,7 +158,10 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
             self.builder.name, self.number, statusToString(self.results))
 
     def blamelist(self):
-        # FIXME: kill this. This belongs to reporter.utils
+        # Note that this algorithm is also implemented in buildbot.reporters.utils.getResponsibleUsersForBuild,
+        # but using the data api.
+        # it is important for the UI to have the blamelist easily available.
+        # The best way is to make sure the owners property is set to full blamelist
         blamelist = []
         for c in self.allChanges():
             if c.who not in blamelist:
@@ -190,25 +197,34 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
         return self.workerforbuilder.worker.workername
     deprecatedWorkerClassMethod(locals(), getWorkerName)
 
-    def setupProperties(self):
-        props = interfaces.IProperties(self)
-
-        # give the properties a reference back to this build
-        props.build = self
+    @staticmethod
+    def setupPropertiesKnownBeforeBuildStarts(props, requests, builder,
+                                              workerforbuilder):
+        # Note that this function does not setup the 'builddir' worker property
+        # It's not possible to know it until before the actual worker has
+        # attached.
 
         # start with global properties from the configuration
-        props.updateFromProperties(self.master.config.properties)
+        props.updateFromProperties(builder.master.config.properties)
 
         # from the SourceStamps, which have properties via Change
-        for change in self.allChanges():
+        sources = requests[0].mergeSourceStampsWith(requests[1:])
+        for change in Build.allChangesFromSources(sources):
             props.updateFromProperties(change.properties)
 
-        # and finally, get any properties from requests (this is the path
-        # through which schedulers will send us properties)
-        for rq in self.requests:
+        # get any properties from requests (this is the path through which
+        # schedulers will send us properties)
+        for rq in requests:
             props.updateFromProperties(rq.properties)
 
-        self.builder.setupProperties(props)
+        # get builder properties
+        builder.setupProperties(props)
+
+        # get worker properties
+        # navigate our way back to the L{buildbot.worker.Worker}
+        # object that came from the config, and get its properties
+        worker_properties = workerforbuilder.worker.properties
+        props.updateFromProperties(worker_properties)
 
     def setupOwnProperties(self):
         # now set some properties of our own, corresponding to the
@@ -225,19 +241,19 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
             props.setProperty("codebase", source.codebase, "Build")
             props.setProperty("project", source.project, "Build")
 
-    def setupWorkerForBuilder(self, workerforbuilder):
-        self.path_module = workerforbuilder.worker.path_module
+    def setupWorkerBuildirProperty(self, workerforbuilder):
+        path_module = workerforbuilder.worker.path_module
 
         # navigate our way back to the L{buildbot.worker.Worker}
         # object that came from the config, and get its properties
-        worker_properties = workerforbuilder.worker.properties
-        self.getProperties().updateFromProperties(worker_properties)
         if workerforbuilder.worker.worker_basedir:
-            builddir = self.path_module.join(
+            builddir = path_module.join(
                 bytes2NativeString(workerforbuilder.worker.worker_basedir),
                 bytes2NativeString(self.builder.config.workerbuilddir))
             self.setProperty("builddir", builddir, "Worker")
 
+    def setupWorkerForBuilder(self, workerforbuilder):
+        self.path_module = workerforbuilder.worker.path_module
         self.workername = workerforbuilder.worker.workername
         self._registerOldWorkerAttr("workername")
         self.build_status.setWorkername(self.workername)
@@ -325,7 +341,12 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
         # If it returns failure then we don't start a new build.
         if ready_or_failure is not True:
             yield self.buildPreparationFailure(ready_or_failure, "worker_prepare")
-            self.buildFinished(["worker", "not", "available"], RETRY)
+            if self.stopped:
+                self.buildFinished(["worker", "cancelled"], self.results)
+            elif isinstance(ready_or_failure, Failure) and ready_or_failure.check(interfaces.LatentWorkerCannotSubstantiate):
+                self.buildFinished(["worker", "cannot", "substantiate"], EXCEPTION)
+            else:
+                self.buildFinished(["worker", "not", "available"], RETRY)
             return
 
         # ping the worker to make sure they're still there. If they've
@@ -351,6 +372,12 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
             return
 
         self.conn = workerforbuilder.worker.conn
+
+        # To retrieve the builddir property, the worker must be attached as we
+        # depend on its path_module. Latent workers become attached only after
+        # preparing them, so we can't setup the builddir property earlier like
+        # the rest of properties
+        self.setupWorkerBuildirProperty(workerforbuilder)
         self.setupWorkerForBuilder(workerforbuilder)
         self.subs = self.conn.notifyOnDisconnect(self.lostRemote)
 
@@ -368,9 +395,6 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
 
         yield self.master.data.updates.setBuildStateString(self.buildid,
                                                            u'building')
-
-        # This worker looks sane!
-        worker.resetQuarantine()
 
         # start the sequence of steps
         self.startNextStep()
@@ -446,17 +470,12 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
 
         self.steps = self.setupBuildSteps(self.stepFactories)
 
-        # we are now ready to set up our BuildStatus.
-        # pass all sourcestamps to the buildstatus
-        self.build_status.setSourceStamps(self.sources)
-        self.build_status.setReason(self.reason)
-        self.build_status.setBlamelist(self.blamelist())
-
+        owners = set(self.blamelist())
         # gather owners from build requests
-        owners = [r.properties['owner'] for r in self.requests
-                  if "owner" in r.properties]
+        owners.update({r.properties['owner'] for r in self.requests
+                       if "owner" in r.properties})
         if owners:
-            self.setProperty('owners', owners, 'Build')
+            self.setProperty('owners', sorted(owners), 'Build')
         self.text = []  # list of text string lists (text2)
 
     def _addBuildSteps(self, step_factories):
@@ -651,6 +670,14 @@ class Build(properties.PropertiesMixin, WorkerAPICompatMixin):
             yield self.master.data.updates.setBuildStateString(self.buildid,
                                                                bytes2unicode(" ".join(text)))
             yield self.master.data.updates.finishBuild(self.buildid, self.results)
+
+            if self.results == EXCEPTION:
+                # When a build has an exception, put the worker in quarantine for a few seconds
+                # to make sure we try next build with another worker
+                self.workerforbuilder.worker.putInQuarantine()
+            elif self.results != RETRY:
+                # This worker looks sane if status is neither retry or exception
+                self.workerforbuilder.worker.resetQuarantine()
 
             # mark the build as finished
             self.workerforbuilder.buildFinished()

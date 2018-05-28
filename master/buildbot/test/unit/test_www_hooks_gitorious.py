@@ -24,10 +24,9 @@ import buildbot.www.change_hook as change_hook
 from buildbot.test.fake.web import FakeRequest
 from buildbot.test.fake.web import fakeMasterForHooks
 
-
 # Sample Gitorious commit payload
 # source: http://gitorious.org/gitorious/pages/WebHooks
-gitJsonPayload = r"""
+gitJsonPayload = b"""
 {
   "after": "df5744f7bc8663b39717f87742dc94f52ccbf4dd",
   "before": "b4ca2d38e756695133cbd0e03d078804e1dc6610",
@@ -41,7 +40,7 @@ gitJsonPayload = r"""
       "id": "df5744f7bc8663b39717f87742dc94f52ccbf4dd",
       "message": "added a place to put the docstring for Book",
       "timestamp": "2012-01-10T11:02:27-07:00",
-      "url": "http:\/\/gitorious.org\/q\/mainline\/commit\/df5744f7bc8663b39717f87742dc94f52ccbf4dd"
+      "url": "http://gitorious.org/q/mainline/commit/df5744f7bc8663b39717f87742dc94f52ccbf4dd"
     }
   ],
   "project": {
@@ -58,7 +57,7 @@ gitJsonPayload = r"""
     "owner": {
       "name": "jason"
     },
-    "url": "http:\/\/gitorious.org\/q\/mainline"
+    "url": "http://gitorious.org/q/mainline"
   }
 }
 """
@@ -74,7 +73,7 @@ class TestChangeHookConfiguredWithGitChange(unittest.TestCase):
     # Test 'base' hook with attributes. We should get a json string
     # representing a Change object as a dictionary. All values show be set.
     def testGitWithChange(self):
-        changeDict = {"payload": [gitJsonPayload]}
+        changeDict = {b"payload": [gitJsonPayload]}
         self.request = FakeRequest(changeDict)
         self.request.uri = b"/change_hook/gitorious"
         self.request.method = b"POST"

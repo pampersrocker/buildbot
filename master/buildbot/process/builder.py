@@ -27,13 +27,15 @@ from zope.interface import implementer
 
 from buildbot import interfaces
 from buildbot.data import resultspec
+from buildbot.interfaces import IRenderable
 from buildbot.process import buildrequest
 from buildbot.process import workerforbuilder
 from buildbot.process.build import Build
+from buildbot.process.properties import Properties
 from buildbot.process.results import RETRY
-from buildbot.util import service as util_service
-from buildbot.util import ascii2unicode
+from buildbot.util import bytes2unicode
 from buildbot.util import epoch2datetime
+from buildbot.util import service as util_service
 from buildbot.worker_transition import WorkerAPICompatMixin
 from buildbot.worker_transition import deprecatedWorkerClassMethod
 from buildbot.worker_transition import deprecatedWorkerModuleAttribute
@@ -134,7 +136,7 @@ class Builder(util_service.ReconfigurableServiceMixin,
     def getBuilderIdForName(self, name):
         # buildbot.config should ensure this is already unicode, but it doesn't
         # hurt to check again
-        name = ascii2unicode(name)
+        name = bytes2unicode(name)
         return self.master.data.updates.findBuilderId(name)
 
     def getBuilderId(self):
@@ -161,10 +163,25 @@ class Builder(util_service.ReconfigurableServiceMixin,
         bldrid = yield self.getBuilderId()
         unclaimed = yield self.master.data.get(
             ('builders', bldrid, 'buildrequests'),
-            [resultspec.Filter('claimed', 'eq', [False])])
+            [resultspec.Filter('claimed', 'eq', [False])],
+            order=['submitted_at'], limit=1)
         if unclaimed:
-            unclaimed = sorted([brd['submitted_at'] for brd in unclaimed])
-            defer.returnValue(unclaimed[0])
+            defer.returnValue(unclaimed[0]['submitted_at'])
+
+    @defer.inlineCallbacks
+    def getNewestCompleteTime(self):
+        """Returns the complete_at of the latest completed build request for
+        this builder, or None if there are no such build requests.
+
+        @returns: datetime instance or None, via Deferred
+        """
+        bldrid = yield self.getBuilderId()
+        completed = yield self.master.data.get(
+            ('builders', bldrid, 'buildrequests'),
+            [resultspec.Filter('complete', 'eq', [False])],
+            order=['-complete_at'], limit=1)
+        if completed:
+            defer.returnValue(completed[0]['complete_at'])
         else:
             defer.returnValue(None)
 
@@ -261,10 +278,32 @@ class Builder(util_service.ReconfigurableServiceMixin,
         return [wfb for wfb in self.workers if wfb.isAvailable()]
     deprecatedWorkerClassMethod(locals(), getAvailableWorkers)
 
-    def canStartWithWorkerForBuilder(self, workerforbuilder):
+    @defer.inlineCallbacks
+    def canStartWithWorkerForBuilder(self, workerforbuilder, buildrequests=None):
+        locks = self.config.locks
+        if IRenderable.providedBy(locks):
+            if buildrequests is None:
+                raise RuntimeError("buildrequests parameter must be specified "
+                                   " when using renderable builder locks. Not "
+                                   "specifying buildrequests is deprecated")
+
+            # collect properties that would be set for a build if we
+            # started it now and render locks using it
+            props = Properties()
+            Build.setupPropertiesKnownBeforeBuildStarts(props, buildrequests,
+                                                        self, workerforbuilder)
+            locks = yield props.render(locks)
+
+        # Make sure we don't warn and throw an exception at the same time
+        if buildrequests is None:
+            warnings.warn(
+                "Not passing corresponding buildrequests to "
+                "Builder.canStartWithWorkerForBuilder is deprecated")
+
         locks = [(self.botmaster.getLockFromLockAccess(access), access)
-                 for access in self.config.locks]
-        return Build.canStartWithWorkerForBuilder(locks, workerforbuilder)
+                 for access in locks]
+        can_start = Build.canStartWithWorkerForBuilder(locks, workerforbuilder)
+        defer.returnValue(can_start)
     deprecatedWorkerClassMethod(locals(), canStartWithWorkerForBuilder,
                                 compat_name="canStartWithSlavebuilder")
 
@@ -273,15 +312,25 @@ class Builder(util_service.ReconfigurableServiceMixin,
             return defer.maybeDeferred(self.config.canStartBuild, self, workerforbuilder, breq)
         return defer.succeed(True)
 
+    @defer.inlineCallbacks
     def _startBuildFor(self, workerforbuilder, buildrequests):
         build = self.config.factory.newBuild(buildrequests)
         build.setBuilder(self)
-        build.setupProperties()
+
+        props = build.getProperties()
+
+        # give the properties a reference back to this build
+        props.build = build
+
+        Build.setupPropertiesKnownBeforeBuildStarts(
+            props, build.requests, build.builder, workerforbuilder)
+
         log.msg("starting build %s using worker %s" %
                 (build, workerforbuilder))
 
         # set up locks
-        build.setLocks(self.config.locks)
+        locks = yield build.render(self.config.locks)
+        yield build.setLocks(locks)
 
         if self.config.env:
             build.setWorkerEnvironment(self.config.env)
@@ -317,7 +366,7 @@ class Builder(util_service.ReconfigurableServiceMixin,
         d.addErrback(log.err, 'from a running build; this is a '
                      'serious error - please file a bug at http://buildbot.net')
 
-        return defer.succeed(True)
+        defer.returnValue(True)
 
     def setupProperties(self, props):
         props.setProperty("buildername", self.name, "Builder")
@@ -326,6 +375,12 @@ class Builder(util_service.ReconfigurableServiceMixin,
                 props.setProperty(propertyname,
                                   self.config.properties[propertyname],
                                   "Builder")
+        if self.config.defaultProperties:
+            for propertyname in self.config.defaultProperties:
+                if propertyname not in props:
+                    props.setProperty(propertyname,
+                                      self.config.defaultProperties[propertyname],
+                                      "Builder")
 
     def buildFinished(self, build, wfb):
         """This is called when the Build has finished (either success or

@@ -35,6 +35,7 @@ from twisted.internet import reactor
 
 from buildbot.data import resultspec
 from buildbot.db import buildrequests
+from buildbot.db import buildsets
 from buildbot.db import changesources
 from buildbot.db import schedulers
 from buildbot.test.util import validation
@@ -428,6 +429,8 @@ class Worker(Row):
         id=None,
         name='some:worker',
         info={"a": "b"},
+        paused=0,
+        graceful=0,
     )
 
     id_column = 'id'
@@ -1321,7 +1324,7 @@ class FakeBuildsetsComponent(FakeDBComponent):
     def completeBuildset(self, bsid, results, complete_at=None,
                          _reactor=reactor):
         if bsid not in self.buildsets or self.buildsets[bsid]['complete']:
-            raise KeyError
+            raise buildsets.AlreadyCompleteError()
         self.buildsets[bsid]['results'] = results
         self.buildsets[bsid]['complete'] = 1
         self.buildsets[bsid]['complete_at'] = \
@@ -1447,6 +1450,8 @@ class FakeWorkersComponent(FakeDBComponent):
                 self.workers[row.id] = dict(
                     id=row.id,
                     name=row.name,
+                    paused=0,
+                    graceful=0,
                     info=row.info)
             elif isinstance(row, ConfiguredWorker):
                 row.id = row.buildermasterid * 10000 + row.workerid
@@ -1496,7 +1501,7 @@ class FakeWorkersComponent(FakeDBComponent):
         # by builderid and masterid
         return defer.succeed(self._mkdict(worker, builderid, masterid))
 
-    def getWorkers(self, masterid=None, builderid=None):
+    def getWorkers(self, masterid=None, builderid=None, paused=None, graceful=None):
         if masterid is not None or builderid is not None:
             builder_masters = self.db.builders.builder_masters
             workers = []
@@ -1517,6 +1522,11 @@ class FakeWorkersComponent(FakeDBComponent):
                 workers.append(worker)
         else:
             workers = list(itervalues(self.workers))
+
+        if paused is not None:
+            workers = [w for w in workers if w['paused'] == paused]
+        if graceful is not None:
+            workers = [w for w in workers if w['graceful'] == graceful]
 
         return defer.succeed([
             self._mkdict(worker, builderid, masterid)
@@ -1568,6 +1578,12 @@ class FakeWorkersComponent(FakeDBComponent):
                 break
         return defer.succeed(None)
 
+    def setWorkerState(self, workerid, paused, graceful):
+        worker = self.workers.get(workerid)
+        if worker is not None:
+            worker['paused'] = int(paused)
+            worker['graceful'] = int(graceful)
+
     def _configuredOn(self, workerid, builderid=None, masterid=None):
         cfg = []
         for cs in itervalues(self.configured):
@@ -1596,6 +1612,8 @@ class FakeWorkersComponent(FakeDBComponent):
             'id': w['id'],
             'workerinfo': w['info'],
             'name': w['name'],
+            'paused': bool(w.get('paused')),
+            'graceful': bool(w.get('graceful')),
             'configured_on': self._configuredOn(w['id'], builderid, masterid),
             'connected_to': self._connectedTo(w['id'], masterid),
         }
@@ -2063,7 +2081,9 @@ class FakeStepsComponent(FakeDBComponent):
         b = self.steps.get(stepid)
         if b:
             urls = json.loads(b['urls_json'])
-            urls.append(dict(name=name, url=url))
+            url_item = dict(name=name, url=url)
+            if url_item not in urls:
+                urls.append(url_item)
             b['urls_json'] = json.dumps(urls)
         return defer.succeed(None)
 

@@ -27,7 +27,7 @@ ascii
 AssertionFailed
 asymmetrics
 Async
-Async
+async
 Atlassian
 attrs
 auth
@@ -37,6 +37,7 @@ authz
 autoconf
 autodetected
 automake
+autopull
 autoreconf
 backend
 backends
@@ -147,6 +148,7 @@ checkin
 childs
 chroot
 chroots
+ci
 cleanupdb
 clickable
 Clickable
@@ -258,6 +260,7 @@ eg
 Eg
 emacs
 emption
+encodeString
 Encodings
 endsWith
 entityType
@@ -273,6 +276,7 @@ failover
 failsafe
 fakedb
 fallback
+favicon
 favour
 fileIsImportant
 filename
@@ -469,6 +473,7 @@ MiB
 minified
 minifies
 mis
+misbehaving
 mixin
 Mixins
 mkdir
@@ -617,6 +622,7 @@ Pywin
 qcow
 qmail
 queuedir
+queried
 queueing
 Queueing
 Raml
@@ -865,6 +871,7 @@ vda
 ve
 versa
 versioned
+versioning
 viewspec
 viewvc
 virt

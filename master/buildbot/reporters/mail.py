@@ -24,6 +24,7 @@ from email.message import Message
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate
+from email.utils import parseaddr
 from io import BytesIO
 
 from twisted.internet import defer
@@ -85,6 +86,7 @@ class Domain(util.ComparableMixin):
 
 @implementer(interfaces.IEmailSender)
 class MailNotifier(NotifierBase):
+    secrets = ["smtpUser", "smtpPassword"]
 
     def checkConfig(self, fromaddr, mode=("failing", "passing", "warnings"),
                     tags=None, builders=None, addLogs=False,
@@ -117,7 +119,7 @@ class MailNotifier(NotifierBase):
             for r in extraRecipients:
                 if not isinstance(r, str) or not VALID_EMAIL.search(r):
                     config.error(
-                        "extra recipient %r is not a valid email" % (r,))
+                        "extra recipient {} is not a valid email".format(r))
 
         if lookup is not None:
             if not isinstance(lookup, string_types):
@@ -189,7 +191,7 @@ class MailNotifier(NotifierBase):
             "Subject cannot contain newlines"
 
         assert type in ('plain', 'html'), \
-            "'%s' message type must be 'plain' or 'html'." % type
+            "'{}' message type must be 'plain' or 'html'.".format(type)
 
         if patches or logs:
             m = MIMEMultipart()
@@ -198,7 +200,7 @@ class MailNotifier(NotifierBase):
         else:
             m = Message()
             m.set_payload(text, ENCODING)
-            m.set_type("text/%s" % type)
+            m.set_type("text/{}".format(type))
 
         m['Date'] = formatdate(localtime=True)
         m['Subject'] = subject
@@ -211,14 +213,14 @@ class MailNotifier(NotifierBase):
                 m.attach(a)
         if logs:
             for log in logs:
-                name = "%s.%s" % (log['stepname'],
-                                  log['name'])
+                name = "{}.{}".format(log['stepname'],
+                                      log['name'])
                 if (self._shouldAttachLog(log['name']) or
                         self._shouldAttachLog(name)):
                     # Use distinct filenames for the e-mail summary
                     if self.buildSetSummary:
-                        filename = "%s.%s" % (log['buildername'],
-                                              name)
+                        filename = "{}.{}".format(log['buildername'],
+                                                  name)
                     else:
                         filename = name
 
@@ -236,6 +238,7 @@ class MailNotifier(NotifierBase):
             extraHeaders = self.extraHeaders
             if len(builds) == 1:
                 props = Properties.fromDict(builds[0]['properties'])
+                props.master = self.master
                 extraHeaders = yield props.render(extraHeaders)
 
             for k, v in iteritems(extraHeaders):
@@ -296,7 +299,7 @@ class MailNotifier(NotifierBase):
                 if VALID_EMAIL.search(r):
                     recipients.add(r)
                 else:
-                    twlog.msg("INVALID EMAIL: %r" % r)
+                    twlog.msg("INVALID EMAIL: {}".format(r))
 
         defer.returnValue(recipients)
 
@@ -320,16 +323,17 @@ class MailNotifier(NotifierBase):
 
     def sendMail(self, m, recipients):
         s = m.as_string()
-        twlog.msg("sending mail (%d bytes) to" % len(s), recipients)
+        twlog.msg("sending mail ({} bytes) to".format(len(s)), recipients)
 
         result = defer.Deferred()
 
         useAuth = self.smtpUser and self.smtpPassword
 
         s = unicode2bytes(s)
+        recipients = [parseaddr(r)[1] for r in recipients]
         sender_factory = ESMTPSenderFactory(
             unicode2bytes(self.smtpUser), unicode2bytes(self.smtpPassword),
-            self.fromaddr, recipients, BytesIO(s),
+            parseaddr(self.fromaddr)[1], recipients, BytesIO(s),
             result, requireTransportSecurity=self.useTls,
             requireAuthentication=useAuth)
 

@@ -35,6 +35,83 @@ There are several common arguments for schedulers, although not all are availabl
 
 ``builderNames``
     This is the set of builders which this scheduler should trigger, specified as a list of names (strings).
+    This can also be an :class:`~IRenderable` object which will render to a list of builder names (or a list of :class:`~IRenderable` that will render to builder names).
+
+    .. note:: When ``builderNames`` is rendered, these additional :class:`~Properties` attributes are available:
+
+       ``master``
+           A reference to the :class:`~BuildMaster` object that owns this scheduler.
+           This can be used to access the data API.
+       ``sourcestamps``
+           The list of sourcestamps that triggered the scheduler.
+       ``changes``
+           The list of changes associated with the sourcestamps.
+       ``files``
+           The list of modified files associated with the changes.
+
+       Any property attached to the change(s) that triggered the scheduler will be combined and available when rendering `builderNames`.
+
+    Here is a simple example:
+
+    .. code-block:: python
+
+       from buildbot.plugins import util, schedulers
+
+       @util.renderer
+       def builderNames(props):
+           builders = set()
+           for f in props.files:
+               if f.endswith('.rst'):
+                   builders.add('check_docs')
+               if f.endswith('.c'):
+                   builders.add('check_code')
+           return list(builders)
+
+       c['schedulers'] = [
+           schedulers.AnyBranchScheduler(
+               name='all',
+               builderNames=builderNames,
+           )
+       ]
+
+    And a more complex one:
+
+    .. code-block:: python
+
+       import fnmatch
+
+       from twisted.internet import defer
+
+       from buildbot.plugins import util, schedulers
+
+       @util.renderer
+       @defer.inlineCallbacks
+       def builderNames(props):
+           # If "buildername_pattern" is defined with "buildbot sendchange",
+           # check if the builder name matches it.
+           pattern = props.getProperty('buildername_pattern')
+
+           # If "builder_tags" is defined with "buildbot sendchange",
+           # only schedule builders that have the specified tags.
+           tags = props.getProperty('builder_tags')
+
+           builders = []
+
+           for b in (yield props.master.data.get(('builders',))):
+               if pattern and not fnmatch.fnmatchcase(b['name'], pattern):
+                   continue
+               if tags and not set(tags.split()).issubset(set(b['tags'])):
+                   continue
+               builders.append(b['name'])
+
+           defer.returnValue(builders)
+
+       c['schedulers'] = [
+          schedulers.AnyBranchScheduler(
+             name='matrix',
+             builderNames=builderNames,
+          )
+       ]
 
 .. index:: Properties; from scheduler
 
@@ -160,7 +237,7 @@ or apply a regular expression, using the attribute name with a "``_re``" suffix:
     import re
     my_filter = util.ChangeFilter(category_re=re.compile('.*deve.*', re.I))
 
-:class:`buildbot.status.web.hooks.github.GitHubEventHandler` has a special
+:class:`buildbot.www.hooks.github.GitHubEventHandler` has a special
 ``github_distinct`` property that can be used to filter whether or not
 non-distinct changes should be considered. For example, if a commit is pushed to
 a branch that is not being watched and then later pushed to a watched branch, by
@@ -832,7 +909,7 @@ What you need in your config file is something like::
         codebases=[
             util.CodebaseParameter(
                 "",
-                name="Main repository",
+                label="Main repository",
                 # will generate a combo box
                 branch=util.ChoiceStringParameter(
                     name="branch",
@@ -935,7 +1012,14 @@ All parameter types have a few common arguments:
 
     If this is true, then an error will be shown to user if there is no input in this field
 
+``maxsize`` (optional; default: None)
+
+    The maximum size of a field (in bytes). 
+    Buildbot will ensure the field sent by the user is not too large.
+
 The parameter types are:
+
+.. bb:sched:: NestedParameter
 
 NestedParameter
 ###############
@@ -961,7 +1045,7 @@ It adds the following arguments:
 
     * ``vertical``: all fields are displayed vertically, aligned in columns (as per the ``column`` attribute of the NestedParameter)
 
-    * ``tabs``: Each field gets its own `tab <http://getbootstrap.com/components/#nav-tabs>`_.
+    * ``tabs``: Each field gets its own `tab <https://getbootstrap.com/components/>`_.
         This can be used to declare complex build forms which won't fit into one screen.
         The children fields are usually other NestedParameters with vertical layout.
 
@@ -1004,7 +1088,7 @@ TextParameter
 
 ::
 
-    StringParameter(name="comments",
+    TextParameter(name="comments",
         label="comments to be displayed to the user of the built binary",
         default="This is a development build", cols=60, rows=5)
 
@@ -1113,6 +1197,8 @@ Example::
         builder1.factory.addStep(Trigger(name="Trigger tests",
                                         schedulerNames=Property("forced_tests")))
 
+.. bb:sched:: CodebaseParameter
+
 CodebaseParameter
 #################
 
@@ -1145,6 +1231,52 @@ This is a parameter group to specify a sourcestamp for a given codebase.
 
     A :ref:`parameter <ForceScheduler-Parameters>` specifying the project for the build.
     The default value is a string parameter.
+
+``patch`` (optional; default: None)
+
+    A :bb:sched:`PatchParameter` specifying that the user can upload a patch for this codebase.
+
+
+.. bb:sched:: FileParameter
+
+FileParameter
+#############
+
+This parameter allows the user to upload a file to a build. 
+The user can either write some text to a text area, or select a file from the browser.
+Note that the file is then stored inside a property, so a ``maxsize`` of 10 megabytes has been set.
+You can still override that ``maxsize`` if you wish.
+
+.. bb:sched:: PatchParameter
+
+PatchParameter
+##############
+
+This parameter allows the user to specify a patch to be applied at the source step.
+The patch is stored within the sourcestamp, and associated to a codebase.
+That is why :bb:sched:`PatchParameter` must be set inside a :bb:sched:`CodebaseParameter`.
+
+:bb:sched:`PatchParameter` is actually a :bb:sched:`NestedParameter` composed of following fields:
+
+.. code-block:: python
+
+    FileParameter('body'),
+    IntParameter('level', default=1),
+    StringParameter('author', default=""),
+    StringParameter('comment', default=""),
+    StringParameter('subdir', default=".")
+
+You can customize any of these fields by overwriting their field name e.g:
+
+.. code-block:: python
+
+    c['schedulers'] = [
+        schedulers.ForceScheduler(
+            name="force",
+            codebases=[util.CodebaseParameter("foo", patch=util.PatchParameter(
+                body=FileParameter('body', maxsize=10000)))],  # override the maximum size of a patch to 10k instead of 10M
+            builderNames=["testy"])]
+
 
 .. bb:sched:: InheritBuildParameter
 

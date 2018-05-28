@@ -18,6 +18,7 @@ from __future__ import division
 from __future__ import print_function
 from future.utils import itervalues
 
+import os
 import sys
 from io import StringIO
 
@@ -34,8 +35,10 @@ from buildbot.data import resultspec
 from buildbot.interfaces import IConfigLoader
 from buildbot.master import BuildMaster
 from buildbot.plugins import worker
+from buildbot.process.properties import Interpolate
 from buildbot.process.results import SUCCESS
 from buildbot.process.results import statusToString
+from buildbot.test.util.sandboxed_worker import SandboxedWorker
 
 try:
     from buildbot_worker.bot import Worker
@@ -108,7 +111,7 @@ class RunMasterBase(unittest.TestCase):
             elif self.proto == 'null':
                 proto = {"null": {}}
                 workerclass = worker.LocalWorker
-            config_dict['workers'] = [workerclass("local1", "localpw")]
+            config_dict['workers'] = [workerclass("local1", password=Interpolate("localpw"), missing_timeout=0)]
             config_dict['protocols'] = proto
 
         m = yield getMaster(self, reactor, config_dict)
@@ -128,14 +131,23 @@ class RunMasterBase(unittest.TestCase):
             # along with the master
             worker_dir = FilePath(self.mktemp())
             worker_dir.createDirectory()
-            self.w = Worker(
-                "127.0.0.1", workerPort, "local1", "localpw", worker_dir.path,
-                False)
+            sandboxed_worker_path = os.environ.get(
+                "SANDBOXED_WORKER_PATH", None)
+            if sandboxed_worker_path is None:
+                self.w = Worker(
+                    "127.0.0.1", workerPort, "local1", "localpw", worker_dir.path,
+                    False)
+            else:
+                self.w = SandboxedWorker(
+                    "127.0.0.1", workerPort, "local1", "localpw", worker_dir.path,
+                    sandboxed_worker_path)
+                self.addCleanup(self.w.shutdownWorker)
+
         elif self.proto == 'null':
             self.w = None
+
         if self.w is not None:
-            self.w.startService()
-            self.addCleanup(self.w.stopService)
+            self.w.setServiceParent(m)
 
         @defer.inlineCallbacks
         def dump():
@@ -151,41 +163,47 @@ class RunMasterBase(unittest.TestCase):
 
     @defer.inlineCallbacks
     def doForceBuild(self, wantSteps=False, wantProperties=False,
-                     wantLogs=False, useChange=False):
+                     wantLogs=False, useChange=False, forceParams=None):
 
+        if forceParams is None:
+            forceParams = {}
         # force a build, and wait until it is finished
         d = defer.Deferred()
 
         # in order to allow trigger based integration tests
         # we wait until the first started build is finished
-        self.firstBuildRequestId = None
+        self.firstbsid = None
 
         def newCallback(_, data):
-            if self.firstBuildRequestId is None:
-                self.firstBuildRequestId = data['buildrequestid']
+            if self.firstbsid is None:
+                self.firstbsid = data['bsid']
                 newConsumer.stopConsuming()
 
         def finishedCallback(_, data):
-            if self.firstBuildRequestId == data['buildrequestid']:
+            if self.firstbsid == data['bsid']:
                 d.callback(data)
 
         newConsumer = yield self.master.mq.startConsuming(
             newCallback,
-            ('buildrequests', None, 'new'))
+            ('buildsets', None, 'new'))
 
         finishedConsumer = yield self.master.mq.startConsuming(
             finishedCallback,
-            ('buildrequests', None, 'complete'))
+            ('buildsets', None, 'complete'))
 
         if useChange is False:
             # use data api to force a build
-            yield self.master.data.control("force", {}, ("forceschedulers", "force"))
+            yield self.master.data.control("force", forceParams, ("forceschedulers", "force"))
         else:
             # use data api to force a build, via a new change
             yield self.master.data.updates.addChange(**useChange)
 
         # wait until we receive the build finished event
-        buildrequest = yield d
+        buildset = yield d
+        buildrequests = yield self.master.data.get(
+            ('buildrequests',),
+            filters=[resultspec.Filter('buildsetid', 'eq', [buildset['bsid']])])
+        buildrequest = buildrequests[-1]
         builds = yield self.master.data.get(
             ('builds',),
             filters=[resultspec.Filter('buildrequestid', 'eq', [buildrequest['buildrequestid']])])

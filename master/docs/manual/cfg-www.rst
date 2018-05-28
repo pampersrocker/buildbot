@@ -129,6 +129,20 @@ This server is configured with the ``www`` configuration key, which specifies a 
             'cookie_expiration_time': datetime.timedelta(weeks=2)
         }
 
+``ui_default_config``
+
+    Settings in the settings page are stored per browser.
+    This configuration parameter allows to override the default settings for all your users.
+    If a user already have changed a value from the default, this will have no effect to him/her.
+    The settings page in the UI will tell you what to insert in your master.cfg to reproduce the configuration you have in your own browser.
+    Example use:
+
+    .. code-block:: python
+
+        c['www']['ui_default_config'] = {
+            'Builders.buildFetchLimit': 500,
+            'Workers.showWorkerBuilders': True,
+        }
 
 .. note::
 
@@ -227,13 +241,77 @@ This feature is similar to the one in the builder list.
           'plugins': {'grid_view': True}
       }
 
+.. _Badges:
+
+Badges
+++++++
+
+Buildbot badges plugin produces an image in SVG or PNG format with information about the last build for the given builder name.
+PNG generation is based on the CAIRO_ SVG engine, it requires a bit more CPU to generate.
+
+
+   .. code-block:: bash
+
+      pip install buildbot-badges
+
+   .. code-block:: python
+
+      c['www'] = {
+          'plugins': {'badges': {}}
+      }
+
+You can the access your builder's badges using urls like ``http://<buildbotURL>/badges/<buildername>.svg``.
+The default templates are very much configurable via the following options.
+
+.. code-block:: python
+
+    {
+        "left_text": "Build Status",  # text on the left part of the image
+        "left_color": "#555",  # color of the left part of the image
+        "style": "flat",  # style of the template availables are "flat", "flat-square", "plastic"
+        "template_name": "{style}.svg.j2",  # name of the template
+        "font_face": "DejaVu Sans",
+        "font_size": 11,
+        "color_scheme": {  # color to be used for right part of the image
+            "exception": "#007ec6",  # blue
+            "failure": "#e05d44",    # red
+            "retry": "#007ec6",      # blue
+            "running": "#007ec6",    # blue
+            "skipped": "a4a61d",     # yellowgreen
+            "success": "#4c1",       # brightgreen
+            "unknown": "#9f9f9f",    # lightgrey
+            "warnings": "#dfb317"    # yellow
+        }
+    }
+
+Those options can be configured either using the plugin configuration:
+
+.. code-block:: python
+
+      c['www'] = {
+          'plugins': {'badges': {"left_color": "#222"}}
+      }
+
+Or via the URL arguments like ``http://<buildbotURL>/badges/<buildername>.svg?left_color=222``.
+Custom templates can also be specified in a ``template`` directory nearby the ``master.cfg``.
+
+.. _CAIRO: https://www.cairographics.org/
+
 .. _Web-Authentication:
 
 Authentication plugins
 ~~~~~~~~~~~~~~~~~~~~~~
 
-By default, Buildbot does not require people to authenticate in order to see the readonly data.
-In order to access control features in the web UI, you will need to configure an authentication plugin.
+By default, Buildbot does not require people to authenticate in order to access control features in the web UI.
+To secure Buildbot, you will need to configure an authentication plugin.
+
+.. note::
+
+   To secure the Buildbot web interface, authorization rules must be provided via the 'authz' configuration.
+   If you simply wish to lock down a Buildbot instance so that only read only access is permitted, you can
+   restrict access to control endpoints to an unpopulated 'admin' role. For example::
+
+      c['www']['authz'] = util.Authz(allowRules=[util.AnyControlEndpointMatcher(role="admins")],roleMatchers=[])
 
 .. note::
 
@@ -265,6 +343,24 @@ The available classes are described here:
             # ...
             'auth': util.UserPasswordAuth({"homer": "doh!"}),
         }
+
+.. py:class:: buildbot.www.auth.CustomAuth()
+
+    This authentication class means to be overridden with a custom ``check_credentials`` method that gets username and password
+    as arguments and check if the user can login. You may use it e.g. to check the credentials against an external database or file.
+
+    ::
+        from buildbot.plugins import util
+
+        class MyAuth(util.CustomAuth):
+            def check_credentials(self, user, password):
+                if user == 'snow' and password == 'white':
+                    return True
+                else:
+                    return False
+
+        from buildbot.plugins import util
+        c['www']['auth'] = MyAuth()
 
 .. py:class:: buildbot.www.auth.HTPasswdAuth(passwdFile)
 
@@ -475,7 +571,7 @@ This extra information is provided by, appropriately enough, user info providers
 These can be passed to :py:class:`~buildbot.www.auth.RemoteUserAuth` and as an element of ``avatar_methods``.
 
 This can also be passed to oauth2 authentication plugins.
-In this case the username provided by oauth2 will be used, and all other informations will be taken from ldap (Full Name, email, and groups):
+In this case the username provided by oauth2 will be used, and all other information will be taken from ldap (Full Name, email, and groups):
 
 Currently only one provider is available:
 
@@ -529,11 +625,11 @@ Example::
 
 .. note::
 
-            In order to use this module, you need to install the ``python3-ldap`` module:
+            In order to use this module, you need to install the ``ldap3`` module:
 
             .. code-block:: bash
 
-                pip install python3-ldap
+                pip install ldap3
 
 In the case of oauth2 authentications, you have to pass the userInfoProvider as keyword argument::
 
@@ -820,7 +916,7 @@ You can grant roles from groups information provided by the Auth plugins, or if 
     ex::
 
         roleMatchers=[
-          util.RolesFromDomains(admins=["gmail.com"])
+          util.RolesFromDomain(admins=["gmail.com"])
         ]
 
 .. py:class:: buildbot.www.authz.roles.RolesFromOwner(roledict)

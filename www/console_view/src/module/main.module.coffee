@@ -103,8 +103,10 @@ class Console extends Controller
         @sortBuildersByTags(@all_builders)
 
         @changesBySSID ?= {}
+        @changesByRevision ?= {}
         for change in @changes
             @changesBySSID[change.sourcestamp.ssid] = change
+            @changesByRevision[change.revision] = change
             @populateChange(change)
 
 
@@ -137,7 +139,7 @@ class Console extends Controller
                 builderids_with_builds += "." + builder.builderid
 
         if builderids_with_builds == @last_builderids_with_builds
-            # dont recalculate if it hasn't changed!
+            # don't recalculate if it hasn't changed!
             return
         # we call recursive function, which finds non-overlapping groups
         tag_line = @_sortBuildersByTags(builders_with_builds)
@@ -206,7 +208,7 @@ class Console extends Controller
                     builders_by_tags[tag].push(builder)
         tags = []
         for tag, builders of builders_by_tags
-            # we dont want the tags that are on all the builders
+            # we don't want the tags that are on all the builders
             if builders.length < all_builders.length
                 tags.push(tag: tag, builders: builders)
 
@@ -271,13 +273,18 @@ class Console extends Controller
             rev = build.properties.got_revision[0]
             # got_revision can be per codebase or just the revision string
             if typeof(rev) == "string"
-                change = @makeFakeChange("", rev, build.started_at)
+                change = @changesByRevision[rev]
+                if not change?
+                    change = @makeFakeChange("", rev, build.started_at)
             else
                 for codebase, revision of rev
-                    change = @makeFakeChange(codebase, revision, build.started_at)
+                    change = @changesByRevision[rev]
+                    if not change?
+                        change = @makeFakeChange(codebase, revision, build.started_at)
 
         if not change?
-            change = @makeFakeChange("unknown codebase", "unknown revision")
+            revision = "unknown revision #{build.builderid}-#{build.buildid}"
+            change = @makeFakeChange("unknown codebase", revision, build.started_at)
 
         change.buildersById[build.builderid].builds.push(build)
 

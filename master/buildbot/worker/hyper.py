@@ -19,12 +19,13 @@ from __future__ import print_function
 
 import time
 
-from twisted.internet import reactor as global_reactor
 from twisted.internet import defer
+from twisted.internet import reactor as global_reactor
 from twisted.internet import threads
 from twisted.python import threadpool
 
 from buildbot import config
+from buildbot.interfaces import IRenderable
 from buildbot.interfaces import LatentWorkerFailedToSubstantiate
 from buildbot.util import service
 from buildbot.util.logger import Logger
@@ -93,13 +94,14 @@ class HyperLatentWorker(DockerBaseWorker):
     def checkConfig(self, name, password, hyper_host,
                     hyper_accesskey, hyper_secretkey, image, hyper_size="s3", masterFQDN=None, **kwargs):
 
-        DockerBaseWorker.checkConfig(self, name, password, image=image, masterFQDN=masterFQDN, **kwargs)
+        DockerBaseWorker.checkConfig(
+            self, name, password, image=image, masterFQDN=masterFQDN, **kwargs)
 
         if not Hyper:
-            config.error("The python modules 'docker-py>=1.4' and 'hyper_sh' are needed to use a"
+            config.error("The python modules 'docker>=2.0' and 'hyper_sh' are needed to use a"
                          " HyperLatentWorker")
 
-        if hyper_size not in self.ALLOWED_SIZES:
+        if not IRenderable.providedBy(hyper_size) and hyper_size not in self.ALLOWED_SIZES:
             config.error("Size is not valid {!r} vs {!r}".format(
                 hyper_size, self.ALLOWED_SIZES))
 
@@ -124,8 +126,8 @@ class HyperLatentWorker(DockerBaseWorker):
 
     @defer.inlineCallbacks
     def start_instance(self, build):
-        image = yield build.render(self.image)
-        yield self.deferToThread(self._thd_start_instance, image)
+        image, size = yield build.render((self.image, self.size))
+        yield self.deferToThread(self._thd_start_instance, image, size)
         defer.returnValue(True)
 
     def _thd_cleanup_instance(self):
@@ -138,7 +140,8 @@ class HyperLatentWorker(DockerBaseWorker):
             if "".join(instance['Names']).strip("/") != container_name:
                 continue
             try:
-                self.client.remove_container(instance['Id'], v=True, force=True)
+                self.client.remove_container(
+                    instance['Id'], v=True, force=True)
             except NotFound:
                 pass  # that's a race condition
             except docker.errors.APIError as e:
@@ -146,7 +149,7 @@ class HyperLatentWorker(DockerBaseWorker):
                     raise
                 # else: also race condition.
 
-    def _thd_start_instance(self, image):
+    def _thd_start_instance(self, image, size):
         t1 = time.time()
         self._thd_cleanup_instance()
         t2 = time.time()
@@ -154,7 +157,7 @@ class HyperLatentWorker(DockerBaseWorker):
             image,
             environment=self.createEnvironment(),
             labels={
-                'sh_hyper_instancetype': self.size
+                'sh_hyper_instancetype': size
             },
             name=self.getContainerName()
         )

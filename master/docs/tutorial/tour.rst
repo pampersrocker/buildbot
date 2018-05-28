@@ -43,10 +43,10 @@ Now, look for the section marked *PROJECT IDENTITY* which reads::
   # the 'title' string will appear at the top of this buildbot installation's
   # home pages (linked to the 'titleURL').
 
-  c['title'] = "Pyflakes"
-  c['titleURL'] = "http://divmod.org/trac/wiki/DivmodPyflakes"
+  c['title'] = "Hello World CI"
+  c['titleURL'] = "https://buildbot.github.io/hello-world/"
 
-If you want, you can change either of these links to anything you want to see what happens when you change them. 
+If you want, you can change either of these links to anything you want to see what happens when you change them.
 
 After making a change go into the terminal and type:
 
@@ -79,7 +79,7 @@ You will see a handful of lines of output from the master log, much like this:
 
 The important lines are the ones telling you that it is loading the new configuration at the top, and the one at the bottom saying that the update is complete.
 
-Now, if you go back to `the waterfall page <http://localhost:8010/waterfall>`_, you will see that the project's name is whatever you may have changed it to and when you click on the URL of the project name at the bottom of the page it should take you to the link you put in the configuration.
+Now, if you go back to `the waterfall page <http://localhost:8010/#/waterfall>`_, you will see that the project's name is whatever you may have changed it to and when you click on the URL of the project name at the bottom of the page it should take you to the link you put in the configuration.
 
 Configuration Errors
 --------------------
@@ -93,8 +93,8 @@ Open up the config again and introduce a syntax error by removing the first sing
 
 .. code-block:: none
 
-  c[title'] = "Pyflakes
-  c[titleURL'] = "http://divmod.org/trac/wiki/DivmodPyflakes"
+  c[title'] = "Hello World CI"
+  c[titleURL'] = "https://buildbot.github.io/hello-world/"
 
 This creates a Python ``SyntaxError``.
 Now go ahead and reconfig the buildmaster:
@@ -140,14 +140,14 @@ Your First Build
 
 By now you're probably thinking: "All this time spent and still not done a single build? What was the name of this project again?"
 
-On the `waterfall <http://localhost:8010/waterfall>`_ page, click on the runtests link.
+On the `Builders <http://localhost:8010/#/builders>`_ page, click on the runtests link.
 You'll see a builder page, and an option that allow you to force a build:
 
 .. image:: _images/force-build.png
    :alt: force a build.
 
 Click *Start Build* - there's no need to fill in any of the fields in this case.
-Next, click on `view in waterfall <http://localhost:8010/waterfall?show=runtests>`_.
+Next, click on `view in waterfall <http://localhost:8010/#/waterfall?show=runtests>`_.
 
 You will now see:
 
@@ -324,14 +324,14 @@ To set this up, add the following lines to master.cfg::
 
 Then you can submit changes using the :bb:cmdline:`try` command.
 
-Let's try this out by making a one-line change to pyflakes, say, to make it trace the tree by default:
+Let's try this out by making a one-line change to hello-world, say, to make it trace the tree by default:
 
 .. code-block:: bash
 
-  git clone git://github.com/buildbot/pyflakes.git pyflakes-git
-  cd pyflakes-git/pyflakes
-  $EDITOR checker.py
-  # change "traceTree = False" on line 185 to "traceTree = True"
+  git clone git://github.com/buildbot/hello-world.git hello-world-git
+  cd hello-world-git/hello
+  $EDITOR __init__.py
+  # change 'return "hello " + who' on line 6 to 'return "greets " + who'
 
 Then run buildbot's ``try`` command as follows:
 
@@ -343,7 +343,7 @@ Then run buildbot's ``try`` command as follows:
 
 This will do ``git diff`` for you and send the resulting patch to the server for build and test against the latest sources from Git.
 
-Now go back to the `waterfall <http://localhost:8010/waterfall>`_ page, click on the runtests link, and scroll down.
+Now go back to the `waterfall <http://localhost:8010/#/waterfall>`_ page, click on the runtests link, and scroll down.
 You should see that another build has been started with your change (and stdout for the tests should be chock-full of parse trees as a result).
 The "Reason" for the job will be listed as "'try' job", and the blamelist will be empty.
 

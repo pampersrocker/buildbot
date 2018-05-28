@@ -37,7 +37,6 @@ from buildbot.util import unicode2bytes
 from buildbot.worker_transition import DeprecatedWorkerAPIWarning
 from buildbot.worker_transition import DeprecatedWorkerNameWarning
 
-
 # Template for master configuration just before worker renaming.
 sample_0_9_0b5 = """\
 from buildbot.plugins import *
@@ -50,7 +49,7 @@ c['protocols'] = {'pb': {'port': 'tcp:0'}}
 
 c['change_source'] = []
 c['change_source'].append(changes.GitPoller(
-        'git://github.com/buildbot/pyflakes.git',
+        'git://github.com/buildbot/hello-world.git',
         workdir='gitpoller-workdir', branch='master',
         pollinterval=300))
 
@@ -65,16 +64,15 @@ c['schedulers'].append(schedulers.ForceScheduler(
                             builderNames=["runtests"]))
 
 factory = util.BuildFactory()
-factory.addStep(steps.Git(repourl='git://github.com/buildbot/pyflakes.git', mode='incremental'))
-factory.addStep(steps.ShellCommand(command=["trial", "pyflakes"]))
+factory.addStep(steps.Git(repourl='git://github.com/buildbot/hello-world.git', mode='incremental'))
+factory.addStep(steps.ShellCommand(command=["trial", "hello"],
+                                   env={"PYTHONPATH": "."}))
 
 c['builders'] = []
 c['builders'].append(
     util.BuilderConfig(name="runtests",
       slavenames=["example-slave"],
       factory=factory))
-
-c['status'] = []
 
 c['title'] = "Pyflakes"
 c['titleURL'] = "https://launchpad.net/pyflakes"
@@ -94,7 +92,7 @@ c['protocols'] = {'pb': {'port': 'tcp:0'}}
 
 c['change_source'] = []
 c['change_source'].append(changes.GitPoller(
-        'git://github.com/buildbot/pyflakes.git',
+        'git://github.com/buildbot/hello-world.git',
         workdir='gitpoller-workdir', branch='master',
         pollinterval=300))
 
@@ -109,16 +107,15 @@ c['schedulers'].append(schedulers.ForceScheduler(
                             builderNames=["runtests"]))
 
 factory = util.BuildFactory()
-factory.addStep(steps.Git(repourl='git://github.com/buildbot/pyflakes.git', mode='incremental'))
-factory.addStep(steps.ShellCommand(command=["trial", "pyflakes"]))
+factory.addStep(steps.Git(repourl='git://github.com/buildbot/hello-world.git', mode='incremental'))
+factory.addStep(steps.ShellCommand(command=["trial", "hello"],
+                                   env={"PYTHONPATH": "."}))
 
 c['builders'] = []
 c['builders'].append(
     util.BuilderConfig(name="runtests",
       workernames=["example-worker"],
       factory=factory))
-
-c['status'] = []
 
 c['title'] = "Pyflakes"
 c['titleURL'] = "https://launchpad.net/pyflakes"

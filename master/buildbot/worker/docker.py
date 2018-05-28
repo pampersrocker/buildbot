@@ -27,6 +27,7 @@ from twisted.internet import threads
 from twisted.python import log
 
 from buildbot import config
+from buildbot.interfaces import LatentWorkerCannotSubstantiate
 from buildbot.interfaces import LatentWorkerFailedToSubstantiate
 from buildbot.util import unicode2bytes
 from buildbot.worker import AbstractLatentWorker
@@ -36,9 +37,11 @@ try:
     from docker import client
     from docker.errors import NotFound
     _hush_pyflakes = [docker, client]
+    docker_py_version = float(docker.__version__.rsplit(".", 1)[0])
 except ImportError:
     docker = None
     client = None
+    docker_py_version = 0.0
 
 
 def _handle_stream_line(line):
@@ -91,7 +94,7 @@ class DockerBaseWorker(AbstractLatentWorker):
         return AbstractLatentWorker.reconfigService(self, name, password, **kwargs)
 
     def getContainerName(self):
-        return ('%s-%s' % ('buildbot' + self.masterhash, self.workername)).replace("_", "-")
+        return ('buildbot-{worker}-{hash}'.format(worker=self.workername, hash=self.masterhash)).replace("_", "-")
 
     @property
     def shortid(self):
@@ -117,12 +120,12 @@ class DockerLatentWorker(DockerBaseWorker):
 
     def checkConfig(self, name, password, docker_host, image=None, command=None,
                     volumes=None, dockerfile=None, version=None, tls=None, followStartupLogs=False,
-                    masterFQDN=None, hostconfig=None, **kwargs):
+                    masterFQDN=None, hostconfig=None, autopull=False, alwaysPull=False, **kwargs):
 
         DockerBaseWorker.checkConfig(self, name, password, image, masterFQDN, **kwargs)
 
         if not client:
-            config.error("The python module 'docker-py>=1.4' is needed to use a"
+            config.error("The python module 'docker>=2.0' is needed to use a"
                          " DockerLatentWorker")
         if not image and not dockerfile:
             config.error("DockerLatentWorker: You need to specify at least"
@@ -145,7 +148,7 @@ class DockerLatentWorker(DockerBaseWorker):
     @defer.inlineCallbacks
     def reconfigService(self, name, password, docker_host, image=None, command=None,
                         volumes=None, dockerfile=None, version=None, tls=None, followStartupLogs=False,
-                        masterFQDN=None, hostconfig=None, **kwargs):
+                        masterFQDN=None, hostconfig=None, autopull=False, alwaysPull=False, **kwargs):
 
         yield DockerBaseWorker.reconfigService(self, name, password, image, masterFQDN, **kwargs)
         self.volumes = volumes or []
@@ -154,6 +157,8 @@ class DockerLatentWorker(DockerBaseWorker):
         self.command = command or []
         self.dockerfile = dockerfile
         self.hostconfig = hostconfig or {}
+        self.autopull = autopull
+        self.alwaysPull = alwaysPull
         # Prepare the parameters for the Docker Client object.
         self.client_args = {'base_url': docker_host}
         if version is not None:
@@ -210,11 +215,15 @@ class DockerLatentWorker(DockerBaseWorker):
 
     def _thd_start_instance(self, image, dockerfile, volumes):
         docker_client = self._getDockerClient()
+        container_name = self.getContainerName()
         # cleanup the old instances
         instances = docker_client.containers(
             all=1,
-            filters=dict(name=self.getContainerName()))
+            filters=dict(name=container_name))
+        container_name = "/{0}".format(container_name)
         for instance in instances:
+            if container_name not in instance['Names']:
+                continue
             try:
                 docker_client.remove_container(instance['Id'], v=True, force=True)
             except NotFound:
@@ -233,15 +242,23 @@ class DockerLatentWorker(DockerBaseWorker):
                 for streamline in _handle_stream_line(line):
                     log.msg(streamline)
 
+        imageExists = self._image_exists(docker_client, image)
+        if ((not imageExists) or self.alwaysPull) and self.autopull:
+            if (not imageExists):
+                log.msg("Image '%s' not found, pulling from registry" % image)
+            docker_client.pull(image)
+
         if (not self._image_exists(docker_client, image)):
             log.msg("Image '%s' not found" % image)
-            raise LatentWorkerFailedToSubstantiate(
+            raise LatentWorkerCannotSubstantiate(
                 'Image "%s" not found on docker host.' % image
             )
 
         volumes, binds = self._thd_parse_volumes(volumes)
         host_conf = self.hostconfig.copy()
         host_conf['binds'] = binds
+        if docker_py_version >= 2.2:
+            host_conf['init'] = True
         host_conf = docker_client.create_host_config(**host_conf)
 
         instance = docker_client.create_container(

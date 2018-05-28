@@ -45,6 +45,8 @@ class GitLabStatusPush(http.HttpStatusPushBase):
     def reconfigService(self, token,
                         startDescription=None, endDescription=None,
                         context=None, baseURL=None, verbose=False, **kwargs):
+
+        token = yield self.renderSecrets(token)
         yield http.HttpStatusPushBase.reconfigService(self, **kwargs)
 
         self.context = context or Interpolate('buildbot/%(prop:buildername)s')
@@ -68,8 +70,8 @@ class GitLabStatusPush(http.HttpStatusPushBase):
         :param project_id: Project ID from GitLab
         :param branch: Branch name to create the status for.
         :param sha: Full sha to create the status for.
-        :param state: one of the following 'pending', 'success', 'error'
-                      or 'failure'.
+        :param state: one of the following 'pending', 'success', 'failed'
+                      or 'canceled'.
         :param target_url: Target url to associate with this status.
         :param description: Short description of the status.
         :param context: Context of the result
@@ -119,6 +121,7 @@ class GitLabStatusPush(http.HttpStatusPushBase):
     @defer.inlineCallbacks
     def send(self, build):
         props = Properties.fromDict(build['properties'])
+        props.master = self.master
 
         if build['complete']:
             state = {
@@ -128,7 +131,7 @@ class GitLabStatusPush(http.HttpStatusPushBase):
                 SKIPPED: 'success',
                 EXCEPTION: 'failed',
                 RETRY: 'pending',
-                CANCELLED: 'failed'
+                CANCELLED: 'canceled'
             }.get(build['results'], 'failed')
             description = yield props.render(self.endDescription)
         else:

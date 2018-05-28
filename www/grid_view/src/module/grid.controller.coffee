@@ -22,13 +22,17 @@ class Grid extends Controller
         @tags = @$stateParams.tag ? []
         if not angular.isArray(@tags)
             @tags = [@tags]
+        @result = @$stateParams.result
+        # XXX: Angular ngOptions tag only works with string values. Force
+        # convert the result code to string.
+        @results = ({code: c + '', text: t} for c, t of resultsService.resultsTexts)
 
         settings = bbSettingsService.getSettingsGroup('Grid')
         @revisionLimit = settings.revisionLimit.value
         @changeFetchLimit = settings.changeFetchLimit.value
         @buildFetchLimit = settings.buildFetchLimit.value
-        @compactChanges = settings.compactChanges.value
-        @rightToLeft = settings.rightToLeft.value
+        @fullChanges = settings.fullChanges.value
+        @leftToRight = settings.leftToRight.value
 
         @buildsets = @data.getBuildsets(
             limit: @buildFetchLimit
@@ -93,14 +97,14 @@ class Grid extends Controller
 
         # only keep the @revisionLimit most recent changes for display
         changes = (change for own cid, change of changes)
-        if @rightToLeft
-            changes.sort((a, b) -> b.changeid - a.changeid)
-            if changes.length > @revisionLimit
-                changes = changes.slice(0, @revisionLimit)
-        else
+        if @leftToRight
             changes.sort((a, b) -> a.changeid - b.changeid)
             if changes.length > @revisionLimit
                 changes = changes.slice(changes.length - @revisionLimit)
+        else
+            changes.sort((a, b) -> b.changeid - a.changeid)
+            if changes.length > @revisionLimit
+                changes = changes.slice(0, @revisionLimit)
         @$scope.changes = changes
 
         @$scope.branches = (br for br of branches)
@@ -108,9 +112,11 @@ class Grid extends Controller
         requestsByBSID = {}
         for req in @buildrequests
             (requestsByBSID[req.buildsetid] ?= []).push(req)
-        buildByReqID = {}
+        buildsByReqID = {}
         for build in @builds
-            buildByReqID[build.buildrequestid] = build
+            # There may be multiple builds for a given request
+            # (for example when a worker connection is lost).
+            (buildsByReqID[build.buildrequestid] ?= []).push(build)
 
         for builder in @builders
             builder.builds = {}
@@ -123,19 +129,30 @@ class Grid extends Controller
                 unless requests?
                     continue
                 for req in requests
-                    build = buildByReqID[req.buildrequestid]
-                    unless build?
+                    builds = buildsByReqID[req.buildrequestid] ? []
+                    if @result? and @result != '' and !isNaN(@result)
+                        i = 0
+                        while i < builds.length
+                            if parseInt(builds[i].results) != parseInt(@result)
+                                builds.splice(i, 1)
+                            else
+                                i += 1
+                    unless builds.length > 0
                         continue
-                    builder = @builders.get(build.builderid)
+                    builder = @builders.get(builds[0].builderid)
                     unless @isBuilderDisplayed(builder)
                         continue
                     buildersById[builder.builderid] = builder
-                    builder.builds[c.changeid] = build
+                    builder.builds[c.changeid] = builds
 
         @$scope.builders = (builder for own i, builder of buildersById)
 
     changeBranch: (branch) =>
         @branch = branch
+        @refresh()
+
+    changeResult: (result) =>
+        @result = result
         @refresh()
 
     toggleTag: (tag) =>
@@ -156,10 +173,12 @@ class Grid extends Controller
             @$stateParams.tag = undefined
         else
             @$stateParams.tag = @tags
+        @$stateParams.result = @result
 
         params =
             branch: @$stateParams.branch
             tag: @$stateParams.tag
+            result: @$stateParams.result
 
         # change URL without reloading page
         @$state.transitionTo(@$state.current, params, {notify: false})

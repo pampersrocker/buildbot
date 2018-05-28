@@ -33,8 +33,8 @@ from twisted.python import runtime
 from twisted.python import util
 from twisted.trial import unittest
 
-from buildbot_worker import util as bsutil
 from buildbot_worker import runprocess
+from buildbot_worker import util as bsutil
 from buildbot_worker.exceptions import AbandonChain
 from buildbot_worker.test.fake.workerforbuilder import FakeWorkerForBuilder
 from buildbot_worker.test.util import compat
@@ -47,15 +47,15 @@ def catCommand():
 
 
 def stdoutCommand(output):
-    return [sys.executable, '-c', 'import sys; sys.stdout.write("%s\\n")' % output]
+    return [sys.executable, '-c', 'import sys; sys.stdout.write("{0}\\n")'.format(output)]
 
 
 def stderrCommand(output):
-    return [sys.executable, '-c', 'import sys; sys.stderr.write("%s\\n")' % output]
+    return [sys.executable, '-c', 'import sys; sys.stderr.write("{0}\\n")'.format(output)]
 
 
 def sleepCommand(dur):
-    return [sys.executable, '-c', 'import time; time.sleep(%d)' % dur]
+    return [sys.executable, '-c', 'import time; time.sleep({0})'.format(dur)]
 
 
 def scriptCommand(function, *args):
@@ -165,6 +165,26 @@ class TestRunProcess(BasedirMixin, unittest.TestCase):
 
         def check(ign):
             self.failIf({'stderr': nl('hello\n')} in b.updates, b.show())
+            self.assertTrue({'rc': 0} in b.updates, b.show())
+        d.addCallback(check)
+        return d
+
+    def test_incrementalDecoder(self):
+        b = FakeWorkerForBuilder(self.basedir)
+        b.unicode_encoding = "utf-8"
+        s = runprocess.RunProcess(
+            b, stderrCommand("hello"), self.basedir, sendStderr=True)
+        pp = runprocess.RunProcessPP(s)
+        # u"\N{SNOWMAN} when encoded to utf-8 bytes is b"\xe2\x98\x83"
+        pp.outReceived(b"\xe2")
+        pp.outReceived(b"\x98\x83")
+        pp.errReceived(b"\xe2")
+        pp.errReceived(b"\x98\x83")
+        d = s.start()
+
+        def check(ign):
+            self.assertTrue({'stderr': u"\N{SNOWMAN}"} in b.updates)
+            self.assertTrue({'stdout': u"\N{SNOWMAN}"} in b.updates)
             self.assertTrue({'rc': 0} in b.updates, b.show())
         d.addCallback(check)
         return d
@@ -436,7 +456,7 @@ class TestRunProcess(BasedirMixin, unittest.TestCase):
         def check(ign):
             headers = "".join([list(update.values())[0]
                                for update in b.updates if list(update) == ["header"]])
-            self.assertFalse(re.match('\bPYTHONPATH=a%s' % (os.pathsep), headers),
+            self.assertFalse(re.match('\bPYTHONPATH=a{0}'.format(os.pathsep), headers),
                              "got:\n" + headers)
         d.addCallback(check)
         return d
@@ -461,6 +481,38 @@ class TestRunProcess(BasedirMixin, unittest.TestCase):
         self.assertRaises(RuntimeError, lambda:
                           runprocess.RunProcess(b, stdoutCommand('hello'), self.basedir,
                                                 environ={"BUILD_NUMBER": 13}))
+
+    def _test_spawnAsBatch(self, cmd, comspec):
+
+        def spawnProcess(processProtocol, executable, args=(), env=None,
+                         path=None, uid=None, gid=None, usePTY=False, childFDs=None):
+            self.assertTrue(args[0].lower().endswith("cmd.exe"),
+                            "{0} is not cmd.exe".format(args[0]))
+
+        self.patch(runprocess.reactor, "spawnProcess", spawnProcess)
+        tempEnviron = os.environ.copy()
+        if 'COMSPEC' not in tempEnviron:
+            tempEnviron['COMSPEC'] = comspec
+        self.patch(os, "environ", tempEnviron)
+        b = FakeWorkerForBuilder(self.basedir)
+        s = runprocess.RunProcess(b, cmd, self.basedir)
+        s.pp = runprocess.RunProcessPP(s)
+        s.deferred = defer.Deferred()
+        d = s._spawnAsBatch(s.pp, s.command, "args",
+                            tempEnviron, "path", False)
+        return d
+
+    def test_spawnAsBatchCommandString(self):
+        return self._test_spawnAsBatch("dir c:/", "cmd.exe")
+
+    def test_spawnAsBatchCommandList(self):
+        return self._test_spawnAsBatch(stdoutCommand('hello'), "cmd.exe /c")
+
+    def test_spawnAsBatchCommandWithNonAscii(self):
+        return self._test_spawnAsBatch(u"echo \u6211", "cmd.exe")
+
+    def test_spawnAsBatchCommandListWithNonAscii(self):
+        return self._test_spawnAsBatch(['echo', u"\u6211"], "cmd.exe /c")
 
 
 class TestPOSIXKilling(BasedirMixin, unittest.TestCase):
@@ -495,7 +547,7 @@ class TestPOSIXKilling(BasedirMixin, unittest.TestCase):
         self.tearDownBasedir()
 
     def newPidfile(self):
-        pidfile = os.path.abspath("test-%d.pid" % len(self.pidfiles))
+        pidfile = os.path.abspath("test-{0}.pid".format(len(self.pidfiles)))
         if os.path.exists(pidfile):
             os.unlink(pidfile)
         self.pidfiles.append(pidfile)
@@ -508,7 +560,8 @@ class TestPOSIXKilling(BasedirMixin, unittest.TestCase):
 
         def poll():
             if reactor.seconds() > until:
-                d.errback(RuntimeError("pidfile %s never appeared" % pidfile))
+                d.errback(RuntimeError(
+                    "pidfile {0} never appeared".format(pidfile)))
                 return
             if os.path.exists(pidfile):
                 try:
@@ -528,10 +581,10 @@ class TestPOSIXKilling(BasedirMixin, unittest.TestCase):
         try:
             os.kill(pid, 0)
         except OSError:
-            self.fail("pid %d still alive" % (pid,))
+            self.fail("pid {0} still alive".format(pid))
 
     def assertDead(self, pid, timeout=5):
-        log.msg("checking pid %r" % (pid,))
+        log.msg("checking pid {0!r}".format(pid))
 
         def check():
             try:
@@ -552,7 +605,7 @@ class TestPOSIXKilling(BasedirMixin, unittest.TestCase):
             time.sleep(0.01)
             if check():
                 return
-        self.fail("pid %d still alive after %ds" % (pid, timeout))
+        self.fail("pid {0} still alive after {1}s".format(pid, timeout))
 
     # tests
 
@@ -791,6 +844,15 @@ class TestLogging(BasedirMixin, unittest.TestCase):
         data = "x" * (runprocess.RunProcess.BUFFER_SIZE + 1)
         s._addToBuffers('stdout', data)
         self.assertEqual(len(b.updates), 1)
+
+    def testSendLog(self):
+        b = FakeWorkerForBuilder(self.basedir)
+        s = runprocess.RunProcess(b, stdoutCommand('hello'), self.basedir)
+        s._addToBuffers(('log', 'stdout'), 'hello ')
+        s._sendBuffers()
+        self.assertEqual(b.updates, [
+            {'log': ('stdout', 'hello ')},
+        ])
 
 
 class TestLogFileWatcher(BasedirMixin, unittest.TestCase):

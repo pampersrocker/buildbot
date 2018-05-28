@@ -23,7 +23,7 @@ from dateutil.parser import parse as dateparse
 
 from twisted.python import log
 
-from buildbot.util import bytes2NativeString
+from buildbot.util import bytes2unicode
 from buildbot.www.hooks.base import BaseHookHandler
 
 _HEADER_EVENT = b'X-Gitlab-Event'
@@ -141,19 +141,23 @@ class GitLabHandler(BaseHookHandler):
         expected_secret = isinstance(self.options, dict) and self.options.get('secret')
         if expected_secret:
             received_secret = request.getHeader(_HEADER_GITLAB_TOKEN)
+            received_secret = bytes2unicode(received_secret)
             if received_secret != expected_secret:
                 raise ValueError("Invalid secret")
         try:
-            payload = json.load(request.content)
+            content = request.content.read()
+            payload = json.loads(bytes2unicode(content))
         except Exception as e:
             raise ValueError("Error loading JSON: " + str(e))
         event_type = request.getHeader(_HEADER_EVENT)
-        event_type = bytes2NativeString(event_type)
+        event_type = bytes2unicode(event_type)
         # newer version of gitlab have a object_kind parameter,
         # which allows not to use the http header
         event_type = payload.get('object_kind', event_type)
-        project = request.args.get('project', [''])[0]
-        codebase = request.args.get('codebase', [None])[0]
+        project = request.args.get(b'project', [''])[0]
+        project = bytes2unicode(project)
+        codebase = request.args.get(b'codebase', [None])[0]
+        codebase = bytes2unicode(codebase)
         if event_type in ("push", "tag_push", "Push Hook"):
             user = payload['user_name']
             repo = payload['repository']['name']

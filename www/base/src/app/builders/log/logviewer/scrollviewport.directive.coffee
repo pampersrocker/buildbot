@@ -5,8 +5,8 @@ ui.scroll is a good directive for infinite scrolling. Its inner working makes it
 
 This scroll directive uses ui.scroll base, but replace the whole DOM manipulation code
 - Can directly scroll to arbitrary position
-- Dont remove out-of-sight DOM. Eventually this will result in huge dom, so please make sure to use bind-once childs.
-    This however as the advantage on only loading each line once.
+- Don't remove out-of-sight DOM. Eventually this will result in huge dom, so please make sure to use bind-once childs.
+    This however has the advantage on only loading each line once.
 - Support line count, and adapt scroll bar appropriately
 - Can follow the end of stream, via updating the scroll-position attribute
 - row height is fixed (or you cannot make geometric calculation to determine the positions of arbitrary elements)
@@ -74,7 +74,7 @@ class Scroll extends Directive
                     isLoading = false # whether we are fetching data
                     loadAll = false  # should we load the whole log
 
-                    # Buffer is a sparse array containing list of rows that are already instanciated into dom
+                    # Buffer is a sparse array containing list of rows that are already instantiated into dom
                     # or padding. padding have the class .padding, and potencially following buffer elements are
                     # sparsed out.
                     buffer = []
@@ -184,6 +184,8 @@ class Scroll extends Directive
                     # load some lines to the DOM using the data source, making sure it is not already loaded
                     loadView = (topIndex, endIndex) ->
                         fetched = (b) -> not b._height?
+                        if isLoading
+                            return
                         while buffer[topIndex]? && fetched(buffer[topIndex]) && topIndex < endIndex
                             topIndex++
 
@@ -192,21 +194,16 @@ class Scroll extends Directive
 
                         if topIndex == endIndex # all is loaded
                             return
-
                         loading(true)
 
                         previousElemIndex = findElement(topIndex)
                         datasource.get(topIndex, endIndex - topIndex).then (d) ->
                             loading(false)
-                            savedScroll = viewport.scrollTop()
                             for item in d
                                 insertItem(previousElemIndex, topIndex, item)
                                 previousElemIndex = topIndex
                                 topIndex++
 
-                            # as we are manipulating the DOM, the scrollTop is updated to try to follow
-                            # the visible, so we must restore it after DOM manipulation
-                            viewport.scrollTop(savedScroll)
                             $timeout -> maybeUpdateView()
 
                     # find an element in the buffer, skipping undefined directly to padding element

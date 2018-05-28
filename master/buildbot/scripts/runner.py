@@ -17,7 +17,7 @@
 # subcommands want to load modules that need the gtk reactor.
 #
 # Also don't forget to mirror your changes on command-line options in manual
-# pages and texinfo documentation.
+# pages and reStructuredText documentation.
 
 from __future__ import absolute_import
 from __future__ import division
@@ -32,7 +32,9 @@ import sqlalchemy as sa
 from twisted.python import reflect
 from twisted.python import usage
 
+import buildbot
 from buildbot.scripts import base
+from buildbot.util import check_functional_environment
 
 # Note that the terms 'options' and 'config' are used interchangeably here - in
 # fact, they are interchanged several times.  Caveat legator.
@@ -511,10 +513,10 @@ class UserOptions(base.SubcommandOptions):
         ["op", None, None,
          "User management operation: add, remove, update, get"],
         ["bb_username", None, None,
-         "Username to set for a given user. Only availabe on 'update', "
+         "Username to set for a given user. Only available on 'update', "
          "and bb_password must be given as well."],
         ["bb_password", None, None,
-         "Password to set for a given user. Only availabe on 'update', "
+         "Password to set for a given user. Only available on 'update', "
          "and bb_username must be given as well."],
         ["ids", None, None,
          "User's identifiers, used to find users in 'remove' and 'get' "
@@ -665,7 +667,7 @@ class CleanupDBOptions(base.BasedirMixin, base.SubcommandOptions):
         ["quiet", "q", "Do not emit the commands being run"],
         ["force", "f",
             "Force log recompression (useful when changing compression algorithm)"],
-        # when this command has several maintainance jobs, we should make
+        # when this command has several maintenance jobs, we should make
         # them optional here. For now there is only one.
     ]
     optParameters = [
@@ -678,7 +680,7 @@ class CleanupDBOptions(base.BasedirMixin, base.SubcommandOptions):
     This command takes an existing buildmaster working directory and
     do some optimization on the database.
 
-    This command is frontend for various database maintainance jobs:
+    This command is frontend for various database maintenance jobs:
 
     - optimiselogs: This optimization groups logs into bigger chunks
       to apply higher level of compression.
@@ -729,7 +731,6 @@ class Options(usage.Options):
     ]
 
     def opt_version(self):
-        import buildbot
         print("Buildbot version: %s" % buildbot.version)
         usage.Options.opt_version(self)
 
@@ -744,6 +745,7 @@ class Options(usage.Options):
 
 def run():
     config = Options()
+    check_functional_environment(buildbot.config)
     try:
         config.parseOptions(sys.argv[1:])
     except usage.error as e:

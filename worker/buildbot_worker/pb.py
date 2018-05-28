@@ -69,7 +69,8 @@ class BotFactory(ReconnectingPBClientFactory):
     # for tests
     _reactor = reactor
 
-    def __init__(self, buildmaster_host, port, keepaliveInterval, maxDelay):
+    def __init__(self, buildmaster_host, port, keepaliveInterval, maxDelay,
+                 maxRetries=None, maxRetriesCallback=None):
         ReconnectingPBClientFactory.__init__(self)
         self.maxDelay = maxDelay
         self.keepaliveInterval = keepaliveInterval
@@ -77,15 +78,25 @@ class BotFactory(ReconnectingPBClientFactory):
         # only here to print useful error messages
         self.buildmaster_host = buildmaster_host
         self.port = port
+        self.maxRetries = maxRetries
+        self.maxRetriesCallback = maxRetriesCallback
+
+    def retry(self, connector=None):
+        ReconnectingPBClientFactory.retry(self, connector=connector)
+        log.msg("Retry attempt {}/{}".format(
+            self.retries, self.maxRetries if self.maxRetries is not None else "inf"))
+        if self.maxRetries is not None and self.retries > self.maxRetries and self.maxRetriesCallback:
+            log.msg("Giving up retrying!")
+            self.maxRetriesCallback()
 
     def startedConnecting(self, connector):
-        log.msg("Connecting to %s:%s" % (self.buildmaster_host, self.port))
+        log.msg("Connecting to {0}:{1}".format(self.buildmaster_host, self.port))
         ReconnectingPBClientFactory.startedConnecting(self, connector)
         self.connector = connector
 
     def gotPerspective(self, perspective):
-        log.msg("Connected to %s:%s; worker is ready" %
-                (self.buildmaster_host, self.port))
+        log.msg("Connected to {0}:{1}; worker is ready".format(
+                self.buildmaster_host, self.port))
         ReconnectingPBClientFactory.gotPerspective(self, perspective)
         self.perspective = perspective
         try:
@@ -96,8 +107,8 @@ class BotFactory(ReconnectingPBClientFactory):
                 self.keepaliveInterval = 10 * 60
         self.activity()
         if self.keepaliveInterval:
-            log.msg("sending application-level keepalives every %d seconds"
-                    % self.keepaliveInterval)
+            log.msg("sending application-level keepalives every {0} seconds".format(
+                    self.keepaliveInterval))
             self.startTimers()
 
     def clientConnectionFailed(self, connector, reason):
@@ -105,14 +116,14 @@ class BotFactory(ReconnectingPBClientFactory):
         why = reason
         if reason.check(error.ConnectionRefusedError):
             why = "Connection Refused"
-        log.msg("Connection to %s:%s failed: %s" %
-                (self.buildmaster_host, self.port, why))
+        log.msg("Connection to {0}:{1} failed: {2}".format(
+                self.buildmaster_host, self.port, why))
         ReconnectingPBClientFactory.clientConnectionFailed(self,
                                                            connector, reason)
 
     def clientConnectionLost(self, connector, reason):
-        log.msg("Lost connection to %s:%s" %
-                (self.buildmaster_host, self.port))
+        log.msg("Lost connection to {0}:{1}".format(
+                self.buildmaster_host, self.port))
         self.connector = None
         self.stopTimers()
         self.perspective = None
@@ -156,7 +167,7 @@ class Worker(WorkerBase, service.MultiService):
     def __init__(self, buildmaster_host, port, name, passwd, basedir,
                  keepalive, usePTY=None, keepaliveTimeout=None, umask=None,
                  maxdelay=300, numcpus=None, unicode_encoding=None,
-                 allow_shutdown=None):
+                 allow_shutdown=None, maxRetries=None):
 
         # note: keepaliveTimeout is ignored, but preserved here for
         # backward-compatibility
@@ -174,6 +185,7 @@ class Worker(WorkerBase, service.MultiService):
 
         self.numcpus = numcpus
         self.shutdown_loop = None
+        self.maxRetries = maxRetries
 
         if allow_shutdown == 'signal':
             if not hasattr(signal, 'SIGHUP'):
@@ -183,7 +195,8 @@ class Worker(WorkerBase, service.MultiService):
             self.shutdown_mtime = 0
 
         self.allow_shutdown = allow_shutdown
-        bf = self.bf = BotFactory(buildmaster_host, port, keepalive, maxdelay)
+        bf = self.bf = BotFactory(buildmaster_host, port, keepalive, maxdelay,
+            maxRetries=self.maxRetries, maxRetriesCallback=self.gracefulShutdown)
         bf.startLogin(
             credentials.UsernamePassword(name, passwd), client=self.bot)
         self.connection = c = internet.TCPClient(
@@ -193,6 +206,8 @@ class Worker(WorkerBase, service.MultiService):
 
     def _hung_connection(self):
         log.msg("connection attempt timed out (is the port number correct?)")
+        if self.maxRetries is not None:
+            self.gracefulShutdown()
 
     def startService(self):
         WorkerBase.startService(self)
@@ -201,8 +216,8 @@ class Worker(WorkerBase, service.MultiService):
             log.msg("Setting up SIGHUP handler to initiate shutdown")
             signal.signal(signal.SIGHUP, self._handleSIGHUP)
         elif self.allow_shutdown == 'file':
-            log.msg("Watching %s's mtime to initiate shutdown" %
-                    self.shutdown_file)
+            log.msg("Watching {0}'s mtime to initiate shutdown".format(
+                    self.shutdown_file))
             if os.path.exists(self.shutdown_file):
                 self.shutdown_mtime = os.path.getmtime(self.shutdown_file)
             self.shutdown_loop = loop = task.LoopingCall(self._checkShutdownFile)
@@ -223,8 +238,8 @@ class Worker(WorkerBase, service.MultiService):
     def _checkShutdownFile(self):
         if os.path.exists(self.shutdown_file) and \
                 os.path.getmtime(self.shutdown_file) > self.shutdown_mtime:
-            log.msg("Initiating shutdown because %s was touched" %
-                    self.shutdown_file)
+            log.msg("Initiating shutdown because {0} was touched".format(
+                    self.shutdown_file))
             self.gracefulShutdown()
 
             # In case the shutdown fails, update our mtime so we don't keep

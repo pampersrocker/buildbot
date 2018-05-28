@@ -105,6 +105,7 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
 
         # flag so we don't try to do fancy things before the master is ready
         self._master_initialized = False
+        self.initLock = defer.DeferredLock()
 
         # set up child services
         self.create_child_services()
@@ -192,6 +193,7 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
 
         self.secrets_manager = SecretManager()
         self.secrets_manager.setServiceParent(self)
+        self.secrets_manager.reconfig_priority = 2000
 
         self.service_manager = service.BuildbotServiceManager()
         self.service_manager.setServiceParent(self)
@@ -204,10 +206,7 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
             if self.masterid is not None:
                 yield self.data.updates.masterActive(name=self.name,
                                                      masterid=self.masterid)
-            # force housekeeping once a day
-            self.masterHouskeepingTimer += 1
-            yield self.data.updates.expireMasters(
-                forceHouseKeeping=(self.masterHouskeepingTimer % (24 * 60)) == 0)
+            yield self.data.updates.expireMasters()
         self.masterHeartbeatService = internet.TimerService(60, heartbeat)
         # we do setServiceParent only when the master is configured
         # master should advertise itself only at that time
@@ -239,6 +238,7 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
 
         startup_succeed = False
         try:
+            yield self.initLock.acquire()
             # load the configuration file, treating errors as fatal
             try:
                 # run the master.cfg in thread, so that it can use blocking
@@ -324,25 +324,31 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
             else:
                 log.msg("BuildMaster startup failed")
 
+            yield self.initLock.release()
             self._master_initialized = True
 
     def sendBuildbotNetUsageData(self):
         if "TRIAL_PYTHONPATH" in os.environ and self.config.buildbotNetUsageData is not None:
             raise RuntimeError(
-                "Shoud not enable buildbotNetUsageData in trial tests!")
+                "Should not enable buildbotNetUsageData in trial tests!")
         sendBuildbotNetUsageData(self)
 
     @defer.inlineCallbacks
     def stopService(self):
-        if self.masterid is not None:
-            yield self.data.updates.masterStopped(
-                name=self.name, masterid=self.masterid)
-        if self.running:
-            yield self.botmaster.cleanShutdown(quickMode=True, stopReactor=False)
-            yield service.AsyncMultiService.stopService(self)
+        try:
+            yield self.initLock.acquire()
+            if self.masterid is not None:
+                yield self.data.updates.masterStopped(
+                    name=self.name, masterid=self.masterid)
+            if self.running:
+                yield self.botmaster.cleanShutdown(
+                    quickMode=True, stopReactor=False)
+                yield service.AsyncMultiService.stopService(self)
 
-        log.msg("BuildMaster is stopped")
-        self._master_initialized = False
+            log.msg("BuildMaster is stopped")
+            self._master_initialized = False
+        finally:
+            yield self.initLock.release()
 
     def reconfig(self):
         # this method wraps doConfig, ensuring it is only ever called once at
@@ -388,6 +394,7 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
         changes_made = False
         failed = False
         try:
+            yield self.initLock.acquire()
             # Run the master.cfg in thread, so that it can use blocking code
             new_config = yield threads.deferToThreadPool(
                 self.reactor, self.reactor.getThreadPool(),
@@ -405,6 +412,9 @@ class BuildMaster(service.ReconfigurableServiceMixin, service.MasterService,
         except Exception:
             log.err(failure.Failure(), 'during reconfig:')
             failed = True
+
+        finally:
+            yield self.initLock.release()
 
         if failed:
             if changes_made:

@@ -26,10 +26,13 @@ from twisted.python.failure import Failure
 from twisted.trial.unittest import SynchronousTestCase
 
 from buildbot.config import BuilderConfig
+from buildbot.interfaces import LatentWorkerCannotSubstantiate
 from buildbot.interfaces import LatentWorkerFailedToSubstantiate
 from buildbot.interfaces import LatentWorkerSubstantiatiationCancelled
 from buildbot.process.buildstep import BuildStep
 from buildbot.process.factory import BuildFactory
+from buildbot.process.results import CANCELLED
+from buildbot.process.results import EXCEPTION
 from buildbot.process.results import RETRY
 from buildbot.process.results import SUCCESS
 from buildbot.test.fake.latent import LatentController
@@ -206,6 +209,43 @@ class Tests(SynchronousTestCase):
             set(brids),
             set([req['buildrequestid'] for req in unclaimed_build_requests]),
         )
+        controller.auto_stop(True)
+
+    @defer.inlineCallbacks
+    def test_failed_substantiations_get_exception(self):
+        """
+        If a latent worker fails to substantiate, the result is an exception.
+        """
+        controller = LatentController('local')
+        config_dict = {
+            'builders': [
+                BuilderConfig(name="testy",
+                              workernames=["local"],
+                              factory=BuildFactory(),
+                              ),
+            ],
+            'workers': [controller.worker],
+            'protocols': {'null': {}},
+            # Disable checks about missing scheduler.
+            'multiMaster': True,
+        }
+        master = self.getMaster(config_dict)
+        builder_id = self.successResultOf(
+            master.data.updates.findBuilderId('testy'))
+
+        # Trigger a buildrequest
+        self.createBuildrequest(master, [builder_id])
+
+        # The worker fails to substantiate.
+        controller.start_instance(
+            Failure(LatentWorkerCannotSubstantiate("substantiation failed")))
+        # Flush the errors logged by the failure.
+        self.flushLoggedErrors(LatentWorkerCannotSubstantiate)
+
+        dbdict = yield master.db.builds.getBuildByNumber(builder_id, 1)
+
+        # When the substantiation fails, the result is an exception.
+        self.assertEqual(EXCEPTION, dbdict['results'])
         controller.auto_stop(True)
 
     def test_worker_accepts_builds_after_failure(self):
@@ -538,3 +578,86 @@ class Tests(SynchronousTestCase):
         builds = self.successResultOf(
             master.data.get(("builds",)))
         self.assertEqual(builds[1]['results'], SUCCESS)
+
+    @defer.inlineCallbacks
+    def test_build_stop_with_cancelled_during_substantiation(self):
+        """
+        If a build is stopping during latent worker substantiating, the build becomes cancelled
+        """
+        controller = LatentController('local')
+        config_dict = {
+            'builders': [
+                BuilderConfig(name="testy",
+                              workernames=["local"],
+                              factory=BuildFactory(),
+                              ),
+            ],
+            'workers': [controller.worker],
+            'protocols': {'null': {}},
+            # Disable checks about missing scheduler.
+            'multiMaster': True,
+        }
+        master = self.getMaster(config_dict)
+        builder = master.botmaster.builders['testy']
+        builder_id = self.successResultOf(builder.getBuilderId())
+
+        # Trigger a buildrequest
+        self.createBuildrequest(master, [builder_id])
+
+        # Stop the build
+        build = builder.getBuild(0)
+        build.stopBuild('no reason', results=CANCELLED)
+
+        # Indicate that the worker can't start an instance.
+        controller.start_instance(False)
+
+        dbdict = yield master.db.builds.getBuildByNumber(builder_id, 1)
+        self.assertEqual(CANCELLED, dbdict['results'])
+        controller.auto_stop(True)
+        self.flushLoggedErrors(LatentWorkerFailedToSubstantiate)
+
+    @defer.inlineCallbacks
+    def test_build_stop_with_retry_during_substantiation(self):
+        """
+        If master is shutting down during latent worker substantiating, the build becomes retry.
+        """
+        controller = LatentController('local')
+        config_dict = {
+            'builders': [
+                BuilderConfig(name="testy",
+                              workernames=["local"],
+                              factory=BuildFactory(),
+                              ),
+            ],
+            'workers': [controller.worker],
+            'protocols': {'null': {}},
+            # Disable checks about missing scheduler.
+            'multiMaster': True,
+        }
+        master = self.getMaster(config_dict)
+        builder = master.botmaster.builders['testy']
+        builder_id = self.successResultOf(builder.getBuilderId())
+
+        # Trigger a buildrequest
+        _, brids = self.createBuildrequest(master, [builder_id])
+
+        unclaimed_build_requests = []
+        self.successResultOf(master.mq.startConsuming(
+            lambda key, request: unclaimed_build_requests.append(request),
+            ('buildrequests', None, 'unclaimed')))
+
+        # Stop the build
+        build = builder.getBuild(0)
+        build.stopBuild('no reason', results=RETRY)
+
+        # Indicate that the worker can't start an instance.
+        controller.start_instance(False)
+
+        dbdict = yield master.db.builds.getBuildByNumber(builder_id, 1)
+        self.assertEqual(RETRY, dbdict['results'])
+        self.assertEqual(
+            set(brids),
+            set([req['buildrequestid'] for req in unclaimed_build_requests]),
+        )
+        controller.auto_stop(True)
+        self.flushLoggedErrors(LatentWorkerFailedToSubstantiate)

@@ -16,10 +16,12 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
+from twisted.internet import defer
 from twisted.internet import error
 from twisted.python.reflect import namedModule
 from twisted.trial import unittest
 
+from buildbot.interfaces import WorkerTooOldError
 from buildbot.process import remotetransfer
 from buildbot.process.results import FAILURE
 from buildbot.process.results import RETRY
@@ -381,7 +383,7 @@ class TestGit(sourcesteps.SourceStepMixin, config.ConfigErrorsMixin, unittest.Te
                         command=['git', 'reset', '--hard', 'FETCH_HEAD', '--'])
             + 0,
             ExpectShell(workdir='wkdir',
-                        command=['git', 'branch', '-M', 'test-branch'])
+                        command=['git', 'checkout', '-B', 'test-branch'])
             + 0,
             ExpectShell(workdir='wkdir',
                         command=['git', 'rev-parse', 'HEAD'])
@@ -897,7 +899,7 @@ class TestGit(sourcesteps.SourceStepMixin, config.ConfigErrorsMixin, unittest.Te
                         command=['git', 'reset', '--hard', 'FETCH_HEAD', '--'])
             + 0,
             ExpectShell(workdir='wkdir',
-                        command=['git', 'branch', '-M', 'test-branch'])
+                        command=['git', 'checkout', '-B', 'test-branch'])
             + 0,
             ExpectShell(workdir='wkdir',
                         command=['git', 'rev-parse', 'HEAD'])
@@ -1076,6 +1078,54 @@ class TestGit(sourcesteps.SourceStepMixin, config.ConfigErrorsMixin, unittest.Te
                         command=['git', '--version'])
             + ExpectShell.log('stdio',
                               stdout='git version 1.7.5')
+            + 0,
+            Expect('stat', dict(file='wkdir/.buildbot-patched',
+                                logEnviron=True))
+            + 1,
+            Expect('listdir', {'dir': 'wkdir', 'logEnviron': True,
+                               'timeout': 1200})
+            + Expect.update('files', ['.git'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'clean', '-f', '-f', '-d', '-x'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'fetch', '-t',
+                                 'http://github.com/buildbot/buildbot.git',
+                                 'HEAD'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'reset', '--hard', 'FETCH_HEAD', '--'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'submodule', 'sync'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'submodule', 'update', '--init', '--recursive'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'submodule', 'foreach', '--recursive', 'git', 'clean',
+                                 '-f', '-f', '-d', '-x'])
+            + 0,
+            ExpectShell(workdir='wkdir',
+                        command=['git', 'rev-parse', 'HEAD'])
+            + ExpectShell.log('stdio',
+                              stdout='f6ad368298bd941e934a41f3babc827b2aa95a1d')
+            + 0,
+        )
+        self.expectOutcome(result=SUCCESS, state_string="update")
+        self.expectProperty('got_revision', 'f6ad368298bd941e934a41f3babc827b2aa95a1d', self.sourceName)
+        return self.runStep()
+
+    def test_mode_full_fresh_submodule_git_newer_1_7_6(self):
+        self.setupStep(
+            self.stepClass(repourl='http://github.com/buildbot/buildbot.git',
+                           mode='full', method='fresh', submodules=True))
+        self.expectCommands(
+            ExpectShell(workdir='wkdir',
+                        command=['git', '--version'])
+            + ExpectShell.log('stdio',
+                              stdout='git version 1.7.6')
             + 0,
             Expect('stat', dict(file='wkdir/.buildbot-patched',
                                 logEnviron=True))
@@ -1350,7 +1400,7 @@ class TestGit(sourcesteps.SourceStepMixin, config.ConfigErrorsMixin, unittest.Te
                         command=['git', 'reset', '--hard', 'FETCH_HEAD', '--'])
             + 0,
             ExpectShell(workdir='wkdir',
-                        command=['git', 'branch', '-M', 'test-branch'])
+                        command=['git', 'checkout', '-B', 'test-branch'])
             + 0,
             ExpectShell(workdir='wkdir',
                         command=['git', 'rev-parse', 'HEAD'])
@@ -2415,3 +2465,44 @@ class TestGit(sourcesteps.SourceStepMixin, config.ConfigErrorsMixin, unittest.Te
         )
         self.expectOutcome(result=RETRY, state_string="update (retry)")
         return self.runStep()
+
+    def _test_invalidGit(self, _dovccmd):
+        def check(failure):
+            self.assertIsInstance(failure.value, WorkerTooOldError)
+            self.assertEqual(str(failure.value), "git is not installed on worker")
+
+        self.patch(self.stepClass, "_dovccmd", _dovccmd)
+        gitStep = self.setupStep(
+            self.stepClass(repourl='http://github.com/buildbot/buildbot.git',
+                           mode='full', method='clean'))
+
+        gitStep._start_deferred = defer.Deferred()
+        gitStep.startVC("branch", "revision", "patch")
+        d = gitStep._start_deferred.addBoth(check)
+        return d
+
+    def test_noGitCommandInstalled(self):
+        @defer.inlineCallbacks
+        def _dovccmd(command, abandonOnFailure=True, collectStdout=False,
+                     initialStdin=None):
+            """
+            Simulate the case where there is no git command.
+            """
+            yield
+            defer.returnValue("command not found:")
+
+        return self._test_invalidGit(_dovccmd)
+
+    def test_gitCommandOutputShowsNoVersion(self):
+        @defer.inlineCallbacks
+        def _dovccmd(command, abandonOnFailure=True, collectStdout=False,
+                     initialStdin=None):
+            """
+            Instead of outputting something like "git version 2.11",
+            simulate truncated output which has no version string,
+            to exercise error handling.
+            """
+            yield
+            defer.returnValue("git ")
+
+        return self._test_invalidGit(_dovccmd)
