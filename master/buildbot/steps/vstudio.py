@@ -192,6 +192,9 @@ class VisualStudio(buildstep.ShellMixin, buildstep.BuildStep):
         return self.results
 
     def getResultSummary(self):
+        # We don't have a logobserver to probe if we were skipped
+        if(self.results == results.SKIPPED):
+            return {"step": "skipped"}
         description = (f'compile {self.logobserver.nbProjects} projects {self.logobserver.nbFiles} '
                        'files')
 
