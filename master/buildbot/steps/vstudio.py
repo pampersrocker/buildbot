@@ -523,15 +523,18 @@ class MsBuild14(MsBuild4):
     vcenv_bat = r"${VS140COMNTOOLS}..\..\VC\vcvarsall.bat"
 
 
-class MsBuild141(VisualStudio):
+class MsBuild(VisualStudio):
     platform = None
     defines = None
     vcenv_bat = r"\VC\Auxiliary\Build\vcvarsall.bat"
     renderables = ['platform']
+    version = None
 
-    def __init__(self, platform, defines=None, **kwargs):
+    def __init__(self, platform, defines=None, version=None, **kwargs):
         self.platform = platform
         self.defines = defines
+        if(version):
+            self.version = version
         super().__init__(**kwargs)
 
     def setupEnvironment(self):
@@ -557,9 +560,9 @@ class MsBuild141(VisualStudio):
         self.descriptionDone = 'built ' + self.describe_project()
         yield self.updateSummary()
 
-        command = (('FOR /F "tokens=*" %%I in (\'vswhere.exe -version "[15.0,16.0)" -property  installationPath\') '
+        command = (('FOR /F "tokens=*" %%I in (\'vswhere.exe -version "{}" -property  installationPath\') '
             ' do "%%I\\%VCENV_BAT%" x86 && msbuild "{}" /p:Configuration="{}" '
-            '/p:Platform="{}" /maxcpucount').format(self.projectfile, self.config,
+            '/p:Platform="{}" /maxcpucount').format(self.version, self.projectfile, self.config,
                                                             self.platform))
 
         command += _msbuild_format_target_parameter(self.mode, self.project)
@@ -569,3 +572,15 @@ class MsBuild141(VisualStudio):
 
         res = yield super().run()
         return res
+
+
+class MsBuild141(MsBuild):
+    version = "[15.0,16.0)"
+
+
+class MsBuild16(MsBuild):
+    version = "[16.0,17.0)"
+
+
+class MsBuild17(MsBuild):
+    version = "[17.0,18.0)"
