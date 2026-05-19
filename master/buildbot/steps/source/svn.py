@@ -47,12 +47,13 @@ class SVN(Source):
 
     name = 'svn'
 
-    renderables = ['repourl', 'password']
+    renderables = ['repourl', 'branchPath', 'password']
     possible_methods = ('clean', 'fresh', 'clobber', 'copy', 'export', None)
 
     def __init__(
         self,
         repourl: IMaybeRenderableType[str] | None = None,
+        branchPath: IMaybeRenderableType[str] | None = None,
         mode: str = 'incremental',
         method: str | None = None,
         username: str | None = None,
@@ -64,6 +65,7 @@ class SVN(Source):
         **kwargs: Any,
     ) -> None:
         self.repourl = repourl
+        self.branchPath = branchPath
         self.username = username
         self.password = password
         self.extra_args = extra_args
@@ -72,6 +74,7 @@ class SVN(Source):
         self.method = method
         self.mode = mode
         self.preferLastChangedRev = preferLastChangedRev
+        self.targetRepourl: str | None = None
         super().__init__(**kwargs)
         errors = []
         if not self._hasAttrGroupMember('mode', self.mode):
@@ -86,10 +89,9 @@ class SVN(Source):
             raise ConfigErrors(errors)
 
     @defer.inlineCallbacks
-    def run_vc(
-        self, branch: str | None, revision: str | None, patch: Any
-    ) -> InlineCallbacksType[int]:
+    def run_vc(self, branch: str | None, revision: str | None, patch: Any) -> InlineCallbacksType[int]:
         self.revision = revision
+        self.targetRepourl = self._computeTargetRepourl()
         self.method = self._getMethod()
         self.stdio_log = yield self.addLogForRemoteCommands("stdio")
 
@@ -125,28 +127,117 @@ class SVN(Source):
             yield self.copy()
             return
 
-        updatable = yield self._sourcedirIsUpdatable()
-        if not updatable:
+        action = yield self._getSourcedirAction()
+        if action == 'clobber':
             # blow away the old (un-updatable) directory and checkout
             yield self.clobber()
-        elif self.method == 'clean':
+            return
+        if action == 'switch':
+            yield self.switch()
+
+        if self.method == 'clean':
             yield self.clean()
         elif self.method == 'fresh':
             yield self.fresh()
 
     @defer.inlineCallbacks
     def mode_incremental(self) -> InlineCallbacksType[None]:
-        updatable = yield self._sourcedirIsUpdatable()
+        action = yield self._getSourcedirAction()
 
-        if not updatable:
+        if action == 'clobber':
             # blow away the old (un-updatable) directory and checkout
             yield self.clobber()
         else:
+            if action == 'switch':
+                yield self.switch()
             # otherwise, do an update
-            command = ['update']
-            if self.revision:
-                command.extend(['--revision', str(self.revision)])
-            yield self._dovccmd(command)
+            yield self._update()
+
+    @defer.inlineCallbacks
+    def _update(self) -> InlineCallbacksType[int]:
+        command = ['update']
+        if self.revision:
+            command.extend(['--revision', str(self.revision)])
+        res = yield self._dovccmd(command)
+        return res  # type: ignore[return-value]
+
+    @defer.inlineCallbacks
+    def switch(self) -> InlineCallbacksType[int]:
+        command = ['switch', self._getTargetRepourl()]
+        if self.revision:
+            command.extend(['--revision', str(self.revision)])
+        res = yield self._dovccmd(command)
+        return res  # type: ignore[return-value]
+
+    def _getTargetRepourl(self) -> str:
+        repourl = self.targetRepourl if self.targetRepourl is not None else self.repourl
+        assert repourl is not None
+        return repourl
+
+    def _computeTargetRepourl(self) -> str | None:
+        if self.repourl is None:
+            return None
+        if self.branchPath is None:
+            return self.repourl
+        return f'{self.repourl}/{self.branchPath}'
+
+    def _computeBranchRootRepourl(self) -> str | None:
+        if self.repourl is None:
+            return None
+        return self.repourl
+
+    def _isAtOrUnderRoot(self, value: str, root: str) -> bool:
+        # Check if we are the root or a subpath of the root.
+        return value == root or value.startswith(f'{root}/')
+
+    def _branchSwitchAllowed(self, current_repourl: str | None) -> bool:
+        # If we have no branchPath, don't allow switching between branches.
+        if self.branchPath is None:
+            return False
+        if current_repourl is None:
+            return False
+        branch_root = self.svnUriCanonicalize(self._computeBranchRootRepourl())
+        if branch_root is None:
+            return False
+        # Check if the extracted repourl is under the branch root.
+        return self._isAtOrUnderRoot(current_repourl, branch_root)
+
+    @defer.inlineCallbacks
+    def _getSourcedirAction(self) -> InlineCallbacksType[str]:
+        # first, perform a stat to ensure that this is really an svn directory
+        res = yield self.pathExists(self.build.path_module.join(self.workdir, '.svn'))  # type: ignore[union-attr]
+        if not res:
+            return 'clobber'
+
+        # then run 'svn info --xml' to check that the URL matches our expected url
+        stdout, stderr = yield self._dovccmd(
+            ['info', '--xml'], collectStdout=True, collectStderr=True, abandonOnFailure=False
+        )
+
+        # svn: E155037: Previous operation has not finished; run 'cleanup' if
+        # it was interrupted
+        if 'E155037:' in stderr:
+            return 'clobber'
+
+        try:
+            stdout_xml = xml.dom.minidom.parseString(stdout)
+            extractedurl = stdout_xml.getElementsByTagName('url')[0].firstChild.nodeValue  # type: ignore[union-attr]
+        except xml.parsers.expat.ExpatError as e:
+            yield self.stdio_log.addHeader('Corrupted xml, aborting step')  # type: ignore[attr-defined]
+            raise buildstep.BuildStepFailed() from e
+
+        current_repourl = self.svnUriCanonicalize(extractedurl)
+        target_repourl = self.svnUriCanonicalize(self._getTargetRepourl())
+        if current_repourl == target_repourl:
+            return 'update'
+        if self._branchSwitchAllowed(current_repourl):
+            return 'switch'
+        return 'clobber'
+
+    @defer.inlineCallbacks
+    def _sourcedirIsUpdatable(self) -> InlineCallbacksType[bool]:
+        action = yield self._getSourcedirAction()
+        return action != 'clobber'
 
     @defer.inlineCallbacks
     def clobber(self) -> InlineCallbacksType[None]:
@@ -263,31 +354,6 @@ class SVN(Source):
         elif self.method is None and self.mode == 'full':
             return 'fresh'
         return None
-
-    @defer.inlineCallbacks
-    def _sourcedirIsUpdatable(self) -> InlineCallbacksType[bool]:
-        # first, perform a stat to ensure that this is really an svn directory
-        res = yield self.pathExists(self.build.path_module.join(self.workdir, '.svn'))  # type: ignore[union-attr]
-        if not res:
-            return False
-
-        # then run 'svn info --xml' to check that the URL matches our repourl
-        stdout, stderr = yield self._dovccmd(
-            ['info', '--xml'], collectStdout=True, collectStderr=True, abandonOnFailure=False
-        )
-
-        # svn: E155037: Previous operation has not finished; run 'cleanup' if
-        # it was interrupted
-        if 'E155037:' in stderr:
-            return False
-
-        try:
-            stdout_xml = xml.dom.minidom.parseString(stdout)
-            extractedurl = stdout_xml.getElementsByTagName('url')[0].firstChild.nodeValue  # type: ignore[union-attr]
-        except xml.parsers.expat.ExpatError as e:
-            yield self.stdio_log.addHeader("Corrupted xml, aborting step")  # type: ignore[attr-defined]
-            raise buildstep.BuildStepFailed() from e
-        return extractedurl == self.svnUriCanonicalize(self.repourl)  # type: ignore[arg-type]
 
     @defer.inlineCallbacks
     def parseGotRevision(self) -> InlineCallbacksType[int]:
@@ -450,7 +516,7 @@ class SVN(Source):
 
     @defer.inlineCallbacks
     def _checkout(self) -> InlineCallbacksType[None]:
-        checkout_cmd = ['checkout', self.repourl, '.']
+        checkout_cmd = ['checkout', self._getTargetRepourl(), '.']
         if self.revision:
             checkout_cmd.extend(["--revision", str(self.revision)])
         if self.retry:

@@ -19,6 +19,13 @@ The :bb:step:`SVN` step should be created with the ``repourl`` argument:
    For example, if you wanted to check out the trunk repository, you could use ``repourl=Interpolate("http://svn.example.com/repos/%(src::branch)s")``.
    Alternatively, if you are using a remote Subversion repository which is accessible through HTTP at a URL of ``http://svn.example.com/repos``, and you wanted to check out the ``trunk/calc`` sub-tree, you would directly use ``repourl="http://svn.example.com/repos/trunk/calc"`` as an argument to your :bb:step:`SVN` step.
 
+``branchPath``
+   (optional): when set, Buildbot builds the checkout URL from ``repourl`` and ``branchPath``.
+   The resulting URL is ``<repourl>/<branchPath>``.
+   For example, with ``repourl="http://svn.example.com/repos/myproject"`` and ``branchPath="branches/release-1"``, Buildbot checks out ``http://svn.example.com/repos/myproject/branches/release-1``.
+   If this resulting URL changes between builds while ``repourl`` remains the same, Buildbot uses :command:`svn switch` and then updates the working copy.
+   If ``repourl`` changes, Buildbot still falls back to clobber and checkout.
+
 If you are building from multiple branches, then you should create the :bb:step:`SVN` step with the ``repourl`` and provide branch information with :ref:`Interpolate`:
 
 .. code-block:: python
@@ -29,6 +36,41 @@ If you are building from multiple branches, then you should create the :bb:step:
         steps.SVN(mode='incremental',
                   repourl=util.Interpolate(
                       'svn://svn.example.org/svn/%(src::branch)s/myproject')))
+
+You can also keep ``repourl`` static and use ``branchPath``:
+
+.. code-block:: python
+
+   from buildbot.plugins import steps, util
+
+   factory.addStep(
+      steps.SVN(
+         mode='incremental',
+         repourl='svn://svn.example.org/svn/myproject',
+         branchPath=util.Interpolate('branches/%(src::branch)s'),
+      )
+   )
+
+Or compute ``branchPath`` with a renderer:
+
+.. code-block:: python
+
+   from buildbot.plugins import steps, util
+
+   @util.renderer
+   def svn_branch_path(props):
+      branch = props.getProperty('branch', 'trunk')
+      if branch == 'trunk':
+         return 'trunk'
+      return f'branches/{branch}'
+
+   factory.addStep(
+      steps.SVN(
+         mode='incremental',
+         repourl='svn://svn.example.org/svn/myproject',
+         branchPath=svn_branch_path,
+      )
+   )
 
 Alternatively, the ``repourl`` argument can be used to create the :bb:step:`SVN` step without :ref:`Interpolate`:
 

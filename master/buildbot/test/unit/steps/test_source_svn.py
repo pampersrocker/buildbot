@@ -497,6 +497,79 @@ class TestSVN(sourcesteps.SourceStepMixin, TestReactorMixin, unittest.TestCase):
         self.expect_property('got_revision', '100', 'SVN')
         return self.run_step()
 
+    def test_mode_incremental_branch_path_switches(self) -> defer.Deferred[None]:
+        self.setup_step(
+            svn.SVN(
+                repourl='http://svn.local/app',
+                branchPath='branches/stable',
+                mode='incremental',
+            ),
+        )
+        self.expect_commands(
+            ExpectShell(workdir='wkdir', command=['svn', '--version']).exit(0),
+            ExpectStat(file='wkdir/.buildbot-patched', log_environ=True).exit(1),
+            ExpectStat(file='wkdir/.svn', log_environ=True).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=['svn', 'info', '--xml', '--non-interactive', '--no-auth-cache'],
+            )
+            .stdout('<?xml version="1.0"?><url>http://svn.local/app/branches/default</url>')
+            .exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=[
+                    'svn',
+                    'switch',
+                    'http://svn.local/app/branches/stable',
+                    '--non-interactive',
+                    '--no-auth-cache',
+                ],
+            ).exit(0),
+            ExpectShell(
+                workdir='wkdir', command=['svn', 'update', '--non-interactive', '--no-auth-cache']
+            ).exit(0),
+            ExpectShell(workdir='wkdir', command=['svn', 'info', '--xml'])
+            .stdout(self.svn_info_stdout_xml)
+            .exit(0),
+        )
+        self.expect_outcome(result=SUCCESS)
+        self.expect_property('got_revision', '100', 'SVN')
+        return self.run_step()
+
+    def test_mode_incremental_branch_path_repourl_change_clobbers(self) -> defer.Deferred[None]:
+        self.setup_step(
+            svn.SVN(repourl='http://svn2.local/app', branchPath='branches/stable', mode='incremental'),
+        )
+        self.expect_commands(
+            ExpectShell(workdir='wkdir', command=['svn', '--version']).exit(0),
+            ExpectStat(file='wkdir/.buildbot-patched', log_environ=True).exit(1),
+            ExpectStat(file='wkdir/.svn', log_environ=True).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=['svn', 'info', '--xml', '--non-interactive', '--no-auth-cache'],
+            )
+            .stdout('<?xml version="1.0"?><url>http://svn.local/app/branches/default</url>')
+            .exit(0),
+            ExpectRmdir(dir='wkdir', log_environ=True, timeout=1200).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=[
+                    'svn',
+                    'checkout',
+                    'http://svn2.local/app/branches/stable',
+                    '.',
+                    '--non-interactive',
+                    '--no-auth-cache',
+                ],
+            ).exit(0),
+            ExpectShell(workdir='wkdir', command=['svn', 'info', '--xml'])
+            .stdout(self.svn_info_stdout_xml)
+            .exit(0),
+        )
+        self.expect_outcome(result=SUCCESS)
+        self.expect_property('got_revision', '100', 'SVN')
+        return self.run_step()
+
     def test_mode_incremental_given_revision(self) -> defer.Deferred[None]:
         self.setup_step(
             svn.SVN(repourl='http://svn.local/app/trunk', mode='incremental'), {"revision": '100'}
@@ -996,6 +1069,85 @@ class TestSVN(sourcesteps.SourceStepMixin, TestReactorMixin, unittest.TestCase):
             .exit(0),
             ExpectShell(
                 workdir='wkdir', command=['svn', 'update', '--non-interactive', '--no-auth-cache']
+            ).exit(0),
+            ExpectShell(workdir='wkdir', command=['svn', 'info', '--xml'])
+            .stdout(self.svn_info_stdout_xml)
+            .exit(0),
+        )
+        self.expect_outcome(result=SUCCESS)
+        self.expect_property('got_revision', '100', 'SVN')
+        return self.run_step()
+
+    def test_mode_full_clean_branch_path_switches(self) -> defer.Deferred[None]:
+        self.setup_step(
+            svn.SVN(
+                repourl='http://svn.local/app', branchPath='branches/stable', mode='full', method='clean'
+            ),
+        )
+        self.expect_commands(
+            ExpectShell(workdir='wkdir', command=['svn', '--version']).exit(0),
+            ExpectStat(file='wkdir/.buildbot-patched', log_environ=True).exit(1),
+            ExpectStat(file='wkdir/.svn', log_environ=True).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=['svn', 'info', '--xml', '--non-interactive', '--no-auth-cache'],
+            )
+            .stdout('<?xml version="1.0"?><url>http://svn.local/app/branches/default</url>')
+            .exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=[
+                    'svn',
+                    'switch',
+                    'http://svn.local/app/branches/stable',
+                    '--non-interactive',
+                    '--no-auth-cache',
+                ],
+            ).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=['svn', 'status', '--xml', '--non-interactive', '--no-auth-cache'],
+            )
+            .stdout(self.svn_st_xml_empty)
+            .exit(0),
+            ExpectShell(
+                workdir='wkdir', command=['svn', 'update', '--non-interactive', '--no-auth-cache']
+            ).exit(0),
+            ExpectShell(workdir='wkdir', command=['svn', 'info', '--xml'])
+            .stdout(self.svn_info_stdout_xml)
+            .exit(0),
+        )
+        self.expect_outcome(result=SUCCESS)
+        self.expect_property('got_revision', '100', 'SVN')
+        return self.run_step()
+
+    def test_mode_full_clean_branch_path_repourl_change_clobbers(self) -> defer.Deferred[None]:
+        self.setup_step(
+            svn.SVN(
+                repourl='http://svn2.local/app', branchPath='branches/stable', mode='full', method='clean'
+            ),
+        )
+        self.expect_commands(
+            ExpectShell(workdir='wkdir', command=['svn', '--version']).exit(0),
+            ExpectStat(file='wkdir/.buildbot-patched', log_environ=True).exit(1),
+            ExpectStat(file='wkdir/.svn', log_environ=True).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=['svn', 'info', '--xml', '--non-interactive', '--no-auth-cache'],
+            )
+            .stdout('<?xml version="1.0"?><url>http://svn.local/app/branches/default</url>')
+            .exit(0),
+            ExpectRmdir(dir='wkdir', log_environ=True, timeout=1200).exit(0),
+            ExpectShell(
+                workdir='wkdir',
+                command=[
+                    'svn',
+                    'checkout',
+                    'http://svn2.local/app/branches/stable',
+                    '.',
+                    '--non-interactive',
+                    '--no-auth-cache',
+                ],
             ).exit(0),
             ExpectShell(workdir='wkdir', command=['svn', 'info', '--xml'])
             .stdout(self.svn_info_stdout_xml)
